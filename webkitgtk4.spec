@@ -18,7 +18,7 @@
 
 Name:           webkitgtk4
 Version:        2.14.7
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        GTK+ Web content engine library
 
 License:        LGPLv2
@@ -80,6 +80,14 @@ Patch23:        b171927.patch
 Patch24:        b170945.patch
 # https://bugs.webkit.org/show_bug.cgi?id=132333
 Patch25:        b132333.patch
+# https://bugs.webkit.org/show_bug.cgi?id=162608
+Patch26:        webkit-update-bundled-woff2.patch
+# https://bugs.webkit.org/show_bug.cgi?id=177768
+Patch27:        webkit-update-bundled-brotli-and-woff2.patch
+# https://bugs.webkit.org/show_bug.cgi?id=177994
+Patch28:        webkit-relicense-bundled-woff2-to-mit.patch
+# https://github.com/google/woff2/pull/96
+Patch29:        webkit-woff2-cassert-include.patch
 
 %if 0%{?bundle_icu}
 Patch50: icu-8198.revert.icu5431.patch
@@ -256,6 +264,10 @@ Support for the GTK+ 2 based NPAPI plugins (such as Adobe Flash) for %{name}.
 %patch23 -p1 -b .b171927
 %patch24 -p1 -b .b170945
 %patch25 -p1 -b .b132333
+%patch26 -p1
+%patch27 -p1
+%patch28 -p1
+%patch29 -p1
 %else
 %autosetup -p1 -n webkitgtk-%{version}
 %endif
@@ -440,6 +452,11 @@ popd
 %{_datadir}/gtk-doc/html/webkitdomgtk-4.0/
 
 %changelog
+* Mon Oct 09 2017 Tomas Popela <tpopela@redhat.com> - 2.14.7-3
+- Update the bundled brotli and woff2 to the latest releases due to
+  woff2's license incompatibility with WebKitGTK+ project
+- Resolves: rhbz#1500368
+
 * Fri Jun 16 2017 Tomas Popela <tpopela@redhat.com> - 2.14.7-2
 - Fix a CLoop patch that was not correctly backported from upstream, causing
   crashes on big endian machines

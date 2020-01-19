@@ -1,0 +1,11 @@
+diff -up webkitgtk-2.14.7/Source/ThirdParty/woff2/src/woff2_dec.cc.cassert_include webkitgtk-2.14.7/Source/ThirdParty/woff2/src/woff2_dec.cc
+--- webkitgtk-2.14.7/Source/ThirdParty/woff2/src/woff2_dec.cc.cassert_include	2017-10-10 15:40:40.771277529 +0200
++++ webkitgtk-2.14.7/Source/ThirdParty/woff2/src/woff2_dec.cc	2017-10-10 15:40:52.399231129 +0200
+@@ -10,6 +10,7 @@
+ 
+ #include <stdlib.h>
+ #include <algorithm>
++#include <cassert>
+ #include <complex>
+ #include <cstring>
+ #include <limits>
