@@ -1,0 +1,94 @@
+From 8b1a3ed94dd942a83aed945c75d410fa41d9fa6a Mon Sep 17 00:00:00 2001
+From: "zalan@apple.com" <zalan@apple.com@268f45cc-cd09-0410-ab3c-d52691b4dbfc>
+Date: Sat, 6 May 2017 04:41:32 +0000
+Subject: [PATCH] Renderers being destroyed should not be added to AX's
+ deferred list. https://bugs.webkit.org/show_bug.cgi?id=171768
+ <rdar://problem/31955660>
+
+Reviewed by Simon Fraser.
+
+Source/WebCore:
+
+In certain cases, when custom scrollbars are present, while destroying the scrollbars' block parent, we
+  - first remove the block from the AX's deferred list (AXObjectCache::remove)
+  - destroy the render layer that owns the custom scrollbars (RenderLayer::destroyLayer)
+  - detach the scrollbars from the parent (block) (RenderObject::removeFromParent)
+    - clean up the block's lines (RenderBlock::deleteLines)
+      - push the block back to the AX's deferred list (AXObjectCache::recomputeDeferredIsIgnored)
+At this point no one will remove the current block from AX's deferred list.
+
+Test: accessibility/crash-when-renderers-are-added-back-to-deferred-list.html
+
+* accessibility/AXObjectCache.cpp:
+(WebCore::AXObjectCache::recomputeDeferredIsIgnored):
+(WebCore::AXObjectCache::deferTextChanged):
+
+LayoutTests:
+
+* accessibility/crash-when-renderers-are-added-back-to-deferred-list-expected.txt: Added.
+* accessibility/crash-when-renderers-are-added-back-to-deferred-list.html: Added.
+
+git-svn-id: http://svn.webkit.org/repository/webkit/trunk@216307 268f45cc-cd09-0410-ab3c-d52691b4dbfc
+
+diff --git a/LayoutTests/accessibility/crash-when-renderers-are-added-back-to-deferred-list-expected.txt b/LayoutTests/accessibility/crash-when-renderers-are-added-back-to-deferred-list-expected.txt
+new file mode 100644
+index 00000000000..e92fce8d5ea
+--- /dev/null
++++ b/LayoutTests/accessibility/crash-when-renderers-are-added-back-to-deferred-list-expected.txt
+@@ -0,0 +1 @@
++PASS if no crash or assert.
+diff --git a/LayoutTests/accessibility/crash-when-renderers-are-added-back-to-deferred-list.html b/LayoutTests/accessibility/crash-when-renderers-are-added-back-to-deferred-list.html
+new file mode 100644
+index 00000000000..73f0e884f18
+--- /dev/null
++++ b/LayoutTests/accessibility/crash-when-renderers-are-added-back-to-deferred-list.html
+@@ -0,0 +1,26 @@
++<!DOCTYPE html>
++<html>
++<head>
++<title>This tests that accessibility ignores elements that are being destroyed</title>
++<script>
++if (window.accessibilityController)
++    accessibilityController.accessibleElementById("foo");
++if (window.testRunner)
++    testRunner.dumpAsText();
++</script>
++<style>
++::-webkit-scrollbar-corner {
++    border: 1px solid green;
++}
++</style>
++</head>
++<body>
++PASS if no crash or assert.
++<div id=foo style="overflow: scroll; height: 10px;"></div>
++<script>
++document.body.offsetHeight;
++foo.style.display = "none";
++document.body.offsetHeight;
++</script>
++</body>
++</html>
+diff --git a/Source/WebCore/accessibility/AXObjectCache.cpp b/Source/WebCore/accessibility/AXObjectCache.cpp
+index 7fdb9cf62a1..e2ed5a50ead 100644
+--- a/Source/WebCore/accessibility/AXObjectCache.cpp
++++ b/Source/WebCore/accessibility/AXObjectCache.cpp
+@@ -2714,11 +2714,15 @@ void AXObjectCache::performDeferredCacheUpdate()
+ 
+ void AXObjectCache::recomputeDeferredIsIgnored(RenderBlock& renderer)
+ {
++    if (renderer.beingDestroyed())
++        return;
+     m_deferredCacheUpdateList.add(&renderer);
+ }
+ 
+ void AXObjectCache::deferTextChanged(RenderText& renderer)
+ {
++    if (renderer.beingDestroyed())
++        return;
+     m_deferredCacheUpdateList.add(&renderer);
+ }
+ 
+-- 
+2.13.0
+

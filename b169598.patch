@@ -1,0 +1,71 @@
+diff -up webkitgtk-2.14.5/Source/WebKit2/NetworkProcess/cache/NetworkCacheStorage.cpp.b169598 webkitgtk-2.14.5/Source/WebKit2/NetworkProcess/cache/NetworkCacheStorage.cpp
+--- webkitgtk-2.14.5/Source/WebKit2/NetworkProcess/cache/NetworkCacheStorage.cpp.b169598	2017-02-07 09:05:09.000000000 +0100
++++ webkitgtk-2.14.5/Source/WebKit2/NetworkProcess/cache/NetworkCacheStorage.cpp	2017-03-20 10:38:46.186058367 +0100
+@@ -358,13 +358,13 @@ struct RecordMetaData {
+     // FIXME: Add encoder/decoder for time_point.
+     std::chrono::milliseconds epochRelativeTimeStamp;
+     SHA1::Digest headerHash;
+-    uint64_t headerSize;
++    uint64_t headerSize { 0 };
+     SHA1::Digest bodyHash;
+-    uint64_t bodySize;
+-    bool isBodyInline;
++    uint64_t bodySize { 0 };
++    bool isBodyInline { false };
+ 
+     // Not encoded as a field. Header starts immediately after meta data.
+-    uint64_t headerOffset;
++    uint64_t headerOffset { 0 };
+ };
+ 
+ static bool decodeRecordMetaData(RecordMetaData& metaData, const Data& fileData)
+diff -up webkitgtk-2.14.5/Source/WebKit2/NetworkProcess/NetworkProcessCreationParameters.h.b169598 webkitgtk-2.14.5/Source/WebKit2/NetworkProcess/NetworkProcessCreationParameters.h
+--- webkitgtk-2.14.5/Source/WebKit2/NetworkProcess/NetworkProcessCreationParameters.h.b169598	2017-02-07 09:05:09.000000000 +0100
++++ webkitgtk-2.14.5/Source/WebKit2/NetworkProcess/NetworkProcessCreationParameters.h	2017-03-20 10:39:16.856883528 +0100
+@@ -48,18 +48,18 @@ struct NetworkProcessCreationParameters
+     void encode(IPC::Encoder&) const;
+     static bool decode(IPC::Decoder&, NetworkProcessCreationParameters&);
+ 
+-    bool privateBrowsingEnabled;
+-    CacheModel cacheModel;
++    bool privateBrowsingEnabled { false };
++    CacheModel cacheModel { CacheModelDocumentViewer };
+     int64_t diskCacheSizeOverride { -1 };
+-    bool canHandleHTTPSServerTrustEvaluation;
++    bool canHandleHTTPSServerTrustEvaluation { true };
+ 
+     String diskCacheDirectory;
+     SandboxExtension::Handle diskCacheDirectoryExtensionHandle;
+ #if ENABLE(NETWORK_CACHE)
+-    bool shouldEnableNetworkCache;
+-    bool shouldEnableNetworkCacheEfficacyLogging;
++    bool shouldEnableNetworkCache { false };
++    bool shouldEnableNetworkCacheEfficacyLogging { false };
+ #if ENABLE(NETWORK_CACHE_SPECULATIVE_REVALIDATION)
+-    bool shouldEnableNetworkCacheSpeculativeRevalidation;
++    bool shouldEnableNetworkCacheSpeculativeRevalidation { false };
+ #endif
+ #endif
+ #if PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101100
+@@ -71,7 +71,7 @@ struct NetworkProcessCreationParameters
+     SandboxExtension::Handle parentBundleDirectoryExtensionHandle;
+ #endif
+     bool shouldSuppressMemoryPressureHandler { false };
+-    bool shouldUseTestingNetworkSession;
++    bool shouldUseTestingNetworkSession { false };
+ 
+     Vector<String> urlSchemesRegisteredForCustomProtocols;
+ 
+@@ -91,9 +91,9 @@ struct NetworkProcessCreationParameters
+ 
+ #if USE(SOUP)
+     String cookiePersistentStoragePath;
+-    uint32_t cookiePersistentStorageType;
+-    HTTPCookieAcceptPolicy cookieAcceptPolicy;
+-    bool ignoreTLSErrors;
++    uint32_t cookiePersistentStorageType { 0 };
++    HTTPCookieAcceptPolicy cookieAcceptPolicy { HTTPCookieAcceptPolicyAlways };
++    bool ignoreTLSErrors { false };
+     Vector<String> languages;
+ #endif
+ 

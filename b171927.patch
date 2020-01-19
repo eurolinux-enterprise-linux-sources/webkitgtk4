@@ -1,0 +1,167 @@
+From 5cf02ff1c546f8333b468a83e2c71503a4e44428 Mon Sep 17 00:00:00 2001
+From: "n_wang@apple.com"
+ <n_wang@apple.com@268f45cc-cd09-0410-ab3c-d52691b4dbfc>
+Date: Wed, 17 May 2017 17:34:27 +0000
+Subject: [PATCH] ASSERTION FAILED in
+ WebCore::AccessibilityNodeObject::insertChild()
+ https://bugs.webkit.org/show_bug.cgi?id=171927 <rdar://problem/32109781>
+
+Reviewed by Chris Fleizach.
+
+Source/WebCore:
+
+The nextSibling() logic might include the continuation sibling that's not
+the child of the current renderer. Make sure we only insert the valid child.
+
+Test: accessibility/insert-children-assert.html
+
+* accessibility/AccessibilityObject.cpp:
+(WebCore::AccessibilityObject::setIsIgnoredFromParentDataForChild):
+* accessibility/AccessibilityRenderObject.cpp:
+(WebCore::AccessibilityRenderObject::nextSibling):
+
+LayoutTests:
+
+* accessibility/insert-children-assert-expected.txt: Added.
+* accessibility/insert-children-assert.html: Added.
+
+
+git-svn-id: http://svn.webkit.org/repository/webkit/trunk@216980 268f45cc-cd09-0410-ab3c-d52691b4dbfc
+
+diff --git a/LayoutTests/accessibility/insert-children-assert-expected.txt b/LayoutTests/accessibility/insert-children-assert-expected.txt
+new file mode 100644
+index 00000000000..7be4cc2ea95
+--- /dev/null
++++ b/LayoutTests/accessibility/insert-children-assert-expected.txt
+@@ -0,0 +1,11 @@
++ab
++c
++de
++This tests that we only insert valid children when building ax tree.
++
++On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
++
++
++PASS valueOccuranceInElementTree(content, value) is 1
++PASS valueOccuranceInElementTree(content, value) is 1
++
+diff --git a/LayoutTests/accessibility/insert-children-assert.html b/LayoutTests/accessibility/insert-children-assert.html
+new file mode 100644
+index 00000000000..86fe93c1d80
+--- /dev/null
++++ b/LayoutTests/accessibility/insert-children-assert.html
+@@ -0,0 +1,73 @@
++<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
++<html>
++<head>
++<script src="../resources/js-test-pre.js"></script>
++<script src="../resources/accessibility-helper.js"></script>
++<script>
++var successfullyParsed = false;
++</script>
++</head>
++<style>
++body {
++    font-family: ahem;
++    -webkit-font-smoothing: none;
++}
++</style>
++<body id="body">
++<div id="content" aria-label="test">
++<summary>a<span>b<div>c</div>d</span>e</summary>
++</div>
++
++<p id="description"></p>
++<div id="console"></div>
++
++<script>
++    description("This tests that we only insert valid children when building ax tree.");
++    
++    if ("webkitRequestFullScreen" in Element.prototype) {
++        if (window.testRunner)
++            testRunner.waitUntilDone();
++        var content = accessibilityController.accessibleElementById("content");
++        var value = "AXValue: d";
++        document.body.offsetTop;
++        var span = document.getElementsByTagName('span')[0];
++
++        var fullscreenChangeEvent = function(event) {
++            if (document.webkitIsFullScreen) {
++                setTimeout(function () {
++                    document.webkitCancelFullScreen();
++                }, 0)
++            } else {
++                if (window.testRunner)
++                    testRunner.notifyDone();
++            }
++            shouldBe("valueOccuranceInElementTree(content, value)", "1");
++        };
++
++        document.addEventListener('webkitfullscreenchange', fullscreenChangeEvent);
++
++        document.addEventListener('keydown', function () {
++            span.webkitRequestFullScreen();
++        });
++        
++        shouldBe("valueOccuranceInElementTree(content, value)", "1");
++        if (window.eventSender)
++            eventSender.keyDown('a');
++    
++        function valueOccuranceInElementTree(element, value) {
++            if (!element) {
++                return 0;
++            }
++            var count = 0;
++            if (element.stringValue == value)
++                count++;
++            var childrenCount = element.childrenCount;
++            for (var k = 0; k < childrenCount; k++)
++                count += valueOccuranceInElementTree(element.childAtIndex(k), value);
++            return count;
++        }
++    }
++    successfullyParsed = true;
++</script>
++</body>
++</html>
+diff --git a/Source/WebCore/accessibility/AccessibilityObject.cpp b/Source/WebCore/accessibility/AccessibilityObject.cpp
+index 64224e3304c..a6876a12731 100644
+--- a/Source/WebCore/accessibility/AccessibilityObject.cpp
++++ b/Source/WebCore/accessibility/AccessibilityObject.cpp
+@@ -3315,9 +3315,14 @@ void AccessibilityObject::ariaOwnsElements(AccessibilityChildrenVector& axObject
+ 
+ void AccessibilityObject::setIsIgnoredFromParentDataForChild(AccessibilityObject* child)
+ {
+-    if (!child || child->parentObject() != this)
++    if (!child)
+         return;
+     
++    if (child->parentObject() != this) {
++        child->clearIsIgnoredFromParentData();
++        return;
++    }
++    
+     AccessibilityIsIgnoredFromParentData result = AccessibilityIsIgnoredFromParentData(this);
+     if (!m_isIgnoredFromParentData.isNull()) {
+         result.isARIAHidden = m_isIgnoredFromParentData.isARIAHidden || equalLettersIgnoringASCIICase(child->getAttribute(aria_hiddenAttr), "true");
+diff --git a/Source/WebCore/accessibility/AccessibilityRenderObject.cpp b/Source/WebCore/accessibility/AccessibilityRenderObject.cpp
+index f077f9a769e..0a8bfe293d1 100644
+--- a/Source/WebCore/accessibility/AccessibilityRenderObject.cpp
++++ b/Source/WebCore/accessibility/AccessibilityRenderObject.cpp
+@@ -410,7 +410,12 @@ AccessibilityObject* AccessibilityRenderObject::nextSibling() const
+     if (!nextSibling)
+         return nullptr;
+     
+-    return axObjectCache()->getOrCreate(nextSibling);
++    // Make sure next sibling has the same parent.
++    AccessibilityObject* nextObj = axObjectCache()->getOrCreate(nextSibling);
++    if (nextObj && nextObj->parentObject() != this->parentObject())
++        return nullptr;
++    
++    return nextObj;
+ }
+ 
+ static RenderBoxModelObject* nextContinuation(RenderObject& renderer)
+-- 
+2.13.0
+

@@ -1,0 +1,40 @@
+From 3857695da5b378c1f21aa8e1d94a0ca6aeb5439f Mon Sep 17 00:00:00 2001
+From: "tpopela@redhat.com"
+ <tpopela@redhat.com@268f45cc-cd09-0410-ab3c-d52691b4dbfc>
+Date: Thu, 1 Jun 2017 08:22:16 +0000
+Subject: [PATCH] RELEASE_ASSERT_NOT_REACHED() in InferredType::kindForFlags()
+ on Big-Endians https://bugs.webkit.org/show_bug.cgi?id=170945
+
+Patch by Tomas Popela  <tpopela@redhat.com>, Mark Lam <mark.lam@apple.com> on 2017-06-01
+Reviewed by Mark Lam.
+
+Re-define PutByIdFlags as a int32_t enum explicitly because it is
+stored as an int32_t value in UnlinkedInstruction.  This prevents
+a bug on 64-bit big endian architectures where the word order is
+inverted (when we convert the UnlinkedInstruction into a CodeBlock
+Instruction), resulting in the PutByIdFlags value not being stored in
+the 32-bit word that the rest of the code expects it to be in.
+
+* bytecode/PutByIdFlags.h:
+
+git-svn-id: http://svn.webkit.org/repository/webkit/trunk@217650 268f45cc-cd09-0410-ab3c-d52691b4dbfc
+---
+ Source/JavaScriptCore/bytecode/PutByIdFlags.h |  2 +-
+ 2 files changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/Source/JavaScriptCore/bytecode/PutByIdFlags.h b/Source/JavaScriptCore/bytecode/PutByIdFlags.h
+index dc2c5e2dc1a..7decfb2eba9 100644
+--- a/Source/JavaScriptCore/bytecode/PutByIdFlags.h
++++ b/Source/JavaScriptCore/bytecode/PutByIdFlags.h
+@@ -29,7 +29,7 @@
+ 
+ namespace JSC {
+ 
+-enum PutByIdFlags : intptr_t {
++enum PutByIdFlags : int32_t {
+     PutByIdNone = 0,
+ 
+     // This flag indicates that the put_by_id is direct. That means that we store the property without
+-- 
+2.13.0
+

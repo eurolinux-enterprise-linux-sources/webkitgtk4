@@ -1,0 +1,83 @@
+From 93ab0483b95b1759d873ad0908a9a8b184e6e1bf Mon Sep 17 00:00:00 2001
+From: "tpopela@redhat.com"
+ <tpopela@redhat.com@268f45cc-cd09-0410-ab3c-d52691b4dbfc>
+Date: Fri, 17 Mar 2017 13:13:02 +0000
+Subject: [PATCH] Fix uninitialized public members in WebProcess
+ https://bugs.webkit.org/show_bug.cgi?id=169604
+
+Reviewed by Michael Catanzaro.
+
+Found by Coverity scan.
+
+* WebProcess/Databases/IndexedDB/WebIDBConnectionToServer.h:
+* WebProcess/InjectedBundle/InjectedBundleNavigationAction.h:
+* WebProcess/Plugins/Netscape/NetscapePlugin.h:
+* WebProcess/Plugins/Netscape/x11/NetscapePluginX11.cpp:
+(WebKit::NetscapePluginX11::NetscapePluginX11):
+
+git-svn-id: http://svn.webkit.org/repository/webkit/trunk@214104 268f45cc-cd09-0410-ab3c-d52691b4dbfc
+
+diff --git a/Source/WebKit2/WebProcess/Databases/IndexedDB/WebIDBConnectionToServer.h b/Source/WebKit2/WebProcess/Databases/IndexedDB/WebIDBConnectionToServer.h
+index c5ed93f..e5d6815 100644
+--- a/Source/WebKit2/WebProcess/Databases/IndexedDB/WebIDBConnectionToServer.h
++++ b/Source/WebKit2/WebProcess/Databases/IndexedDB/WebIDBConnectionToServer.h
+@@ -112,7 +112,7 @@ private:
+ 
+     IPC::Connection* messageSenderConnection() final;
+ 
+-    uint64_t m_identifier;
++    uint64_t m_identifier { 0 };
+     bool m_isOpenInServer { false };
+     RefPtr<WebCore::IDBClient::IDBConnectionToServer> m_connectionToServer;
+ };
+diff --git a/Source/WebKit2/WebProcess/InjectedBundle/InjectedBundleNavigationAction.h b/Source/WebKit2/WebProcess/InjectedBundle/InjectedBundleNavigationAction.h
+index 8eb2533..b3766e3 100644
+--- a/Source/WebKit2/WebProcess/InjectedBundle/InjectedBundleNavigationAction.h
++++ b/Source/WebKit2/WebProcess/InjectedBundle/InjectedBundleNavigationAction.h
+@@ -68,7 +68,7 @@ private:
+     WebCore::NavigationType m_navigationType;
+     WebEvent::Modifiers m_modifiers;
+     WebMouseEvent::Button m_mouseButton;
+-    WebMouseEvent::SyntheticClickType m_syntheticClickType;
++    WebMouseEvent::SyntheticClickType m_syntheticClickType { WebMouseEvent::NoTap };
+     RefPtr<InjectedBundleHitTestResult> m_hitTestResult;
+     RefPtr<InjectedBundleNodeHandle> m_formElement;
+     AtomicString m_downloadAttribute;
+diff --git a/Source/WebKit2/WebProcess/Plugins/Netscape/NetscapePlugin.h b/Source/WebKit2/WebProcess/Plugins/Netscape/NetscapePlugin.h
+index bf569fe..78227f5 100644
+--- a/Source/WebKit2/WebProcess/Plugins/Netscape/NetscapePlugin.h
++++ b/Source/WebKit2/WebProcess/Plugins/Netscape/NetscapePlugin.h
+@@ -344,8 +344,8 @@ private:
+     TimerMap m_timers;
+     unsigned m_nextTimerID;
+ 
+-    bool m_privateBrowsingState;
+-    bool m_storageBlockingState;
++    bool m_privateBrowsingState { false };
++    bool m_storageBlockingState { false };
+ 
+ #if PLUGIN_ARCHITECTURE(MAC)
+     NPDrawingModel m_drawingModel;
+diff --git a/Source/WebKit2/WebProcess/Plugins/Netscape/x11/NetscapePluginX11.cpp b/Source/WebKit2/WebProcess/Plugins/Netscape/x11/NetscapePluginX11.cpp
+index 2bed46a..111df52 100644
+--- a/Source/WebKit2/WebProcess/Plugins/Netscape/x11/NetscapePluginX11.cpp
++++ b/Source/WebKit2/WebProcess/Plugins/Netscape/x11/NetscapePluginX11.cpp
+@@ -166,6 +166,7 @@ NetscapePluginX11::NetscapePluginX11(NetscapePlugin& plugin, Display* display)
+     Visual* visual = visualInfo.get()[0].visual;
+     ASSERT(visual);
+ 
++    m_setWindowCallbackStruct.type = NP_SETWINDOW;
+     m_setWindowCallbackStruct.visual = visual;
+     m_setWindowCallbackStruct.colormap = XCreateColormap(hostDisplay, rootWindowID(), visual, AllocNone);
+ }
+@@ -195,6 +196,7 @@ NetscapePluginX11::NetscapePluginX11(NetscapePlugin& plugin, Display* display, u
+     Display* hostDisplay = x11HostDisplay();
+     m_npWindowID = gtk_socket_get_id(GTK_SOCKET(socket));
+     GdkWindow* window = gtk_widget_get_window(socket);
++    m_setWindowCallbackStruct.type = NP_SETWINDOW;
+     m_setWindowCallbackStruct.display = GDK_WINDOW_XDISPLAY(window);
+     m_setWindowCallbackStruct.visual = GDK_VISUAL_XVISUAL(gdk_window_get_visual(window));
+     m_setWindowCallbackStruct.depth = gdk_visual_get_depth(gdk_window_get_visual(window));
+-- 
+2.9.3
+

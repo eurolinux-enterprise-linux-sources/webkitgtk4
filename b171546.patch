@@ -1,0 +1,276 @@
+From 11b9d41d0af1eab403c23ef4a36706c2005a2626 Mon Sep 17 00:00:00 2001
+From: "zalan@apple.com" <zalan@apple.com@268f45cc-cd09-0410-ab3c-d52691b4dbfc>
+Date: Fri, 12 May 2017 03:18:04 +0000
+Subject: [PATCH] AX: Defer text changes until after the tree is clean if
+ needed. https://bugs.webkit.org/show_bug.cgi?id=171546
+ <rdar://problem/31934942>
+
+Reviewed by Simon Fraser.
+
+Source/WebCore:
+
+While updating an accessibility object state, we might
+trigger unintentional style updates. This style update could
+end up destroying renderes that are still referenced by functions
+on the callstack.
+To avoid that, defer such changes and let AXObjectCache operate on a clean tree.
+
+Test: accessibility/crash-when-render-tree-is-not-clean.html
+
+* accessibility/AXObjectCache.cpp:
+(WebCore::AXObjectCache::remove):
+(WebCore::AXObjectCache::handleAttributeChanged):
+(WebCore::AXObjectCache::labelChanged):
+(WebCore::AXObjectCache::performDeferredCacheUpdate):
+(WebCore::AXObjectCache::deferRecomputeIsIgnored):
+(WebCore::AXObjectCache::deferTextChangedIfNeeded):
+(WebCore::AXObjectCache::recomputeDeferredIsIgnored): Deleted.
+(WebCore::AXObjectCache::deferTextChanged): Deleted.
+* accessibility/AXObjectCache.h: Decouple different type of changes.
+(WebCore::AXObjectCache::deferRecomputeIsIgnored):
+(WebCore::AXObjectCache::deferTextChangedIfNeeded):
+(WebCore::AXObjectCache::recomputeDeferredIsIgnored): Deleted.
+(WebCore::AXObjectCache::deferTextChanged): Deleted.
+* rendering/RenderBlock.cpp:
+(WebCore::RenderBlock::deleteLines):
+* rendering/RenderBlockLineLayout.cpp:
+(WebCore::RenderBlockFlow::createAndAppendRootInlineBox):
+* rendering/RenderText.cpp:
+(WebCore::RenderText::setText):
+
+LayoutTests:
+
+* accessibility/crash-when-render-tree-is-not-clean-expected.txt: Added.
+* accessibility/crash-when-render-tree-is-not-clean.html: Added.
+
+git-svn-id: http://svn.webkit.org/repository/webkit/trunk@216726 268f45cc-cd09-0410-ab3c-d52691b4dbfc
+---
+ ...rash-when-render-tree-is-not-clean-expected.txt |  2 +
+ .../crash-when-render-tree-is-not-clean.html       | 20 +++++++++
+ Source/WebCore/accessibility/AXObjectCache.cpp     | 50 ++++++++++++++--------
+ Source/WebCore/accessibility/AXObjectCache.h       | 11 ++---
+ Source/WebCore/rendering/RenderBlock.cpp           |  2 +-
+ Source/WebCore/rendering/RenderBlockLineLayout.cpp |  2 +-
+ Source/WebCore/rendering/RenderText.cpp            |  2 +-
+ 9 files changed, 112 insertions(+), 25 deletions(-)
+ create mode 100644 LayoutTests/accessibility/crash-when-render-tree-is-not-clean-expected.txt
+ create mode 100644 LayoutTests/accessibility/crash-when-render-tree-is-not-clean.html
+
+diff --git a/LayoutTests/accessibility/crash-when-render-tree-is-not-clean-expected.txt b/LayoutTests/accessibility/crash-when-render-tree-is-not-clean-expected.txt
+new file mode 100644
+index 00000000000..06ad3b074ac
+--- /dev/null
++++ b/LayoutTests/accessibility/crash-when-render-tree-is-not-clean-expected.txt
+@@ -0,0 +1,2 @@
++Pass if no crash or assert.
++
+diff --git a/LayoutTests/accessibility/crash-when-render-tree-is-not-clean.html b/LayoutTests/accessibility/crash-when-render-tree-is-not-clean.html
+new file mode 100644
+index 00000000000..fb6f1b712d6
+--- /dev/null
++++ b/LayoutTests/accessibility/crash-when-render-tree-is-not-clean.html
+@@ -0,0 +1,20 @@
++<!DOCTYPE html>
++<html>
++<head>
++<title>This tests that we properly update the tree before updating accessibility cache.</title>
++<script>
++if (window.accessibilityController)
++    accessibilityController.accessibleElementById("outer");
++if (window.testRunner)
++    testRunner.dumpAsText();
++</script>
++</head>
++<body>
++Pass if no crash or assert.
++<div id=outer><div id=inner>foobar</div></div>
++<script>
++  inner.style.display = "none";
++  outer.setAttribute("aria-labeledby", "inner");
++</script>
++</body>
++</html>
+diff --git a/Source/WebCore/accessibility/AXObjectCache.cpp b/Source/WebCore/accessibility/AXObjectCache.cpp
+index e2ed5a50ead..336b029c7e5 100644
+--- a/Source/WebCore/accessibility/AXObjectCache.cpp
++++ b/Source/WebCore/accessibility/AXObjectCache.cpp
+@@ -711,7 +711,6 @@ void AXObjectCache::remove(RenderObject* renderer)
+     AXID axID = m_renderObjectMapping.get(renderer);
+     remove(axID);
+     m_renderObjectMapping.remove(renderer);
+-    m_deferredCacheUpdateList.remove(renderer);
+ }
+ 
+ void AXObjectCache::remove(Node* node)
+@@ -719,6 +718,9 @@ void AXObjectCache::remove(Node* node)
+     if (!node)
+         return;
+ 
++    if (is<Element>(*node))
++        m_deferredRecomputeIsIgnoredList.remove(downcast<Element>(node));
++    m_deferredTextChangedList.remove(node);
+     removeNodeForUse(node);
+ 
+     // This is all safe even if we didn't have a mapping.
+@@ -1429,7 +1431,7 @@ void AXObjectCache::handleAttributeChanged(const QualifiedName& attrName, Elemen
+     if (attrName == roleAttr)
+         handleAriaRoleChanged(element);
+     else if (attrName == altAttr || attrName == titleAttr)
+-        textChanged(element);
++        deferTextChangedIfNeeded(element);
+     else if (attrName == forAttr && is<HTMLLabelElement>(*element))
+         labelChanged(element);
+ 
+@@ -1443,7 +1445,7 @@ void AXObjectCache::handleAttributeChanged(const QualifiedName& attrName, Elemen
+     else if (attrName == aria_valuenowAttr || attrName == aria_valuetextAttr)
+         postNotification(element, AXObjectCache::AXValueChanged);
+     else if (attrName == aria_labelAttr || attrName == aria_labeledbyAttr || attrName == aria_labelledbyAttr)
+-        textChanged(element);
++        deferTextChangedIfNeeded(element);
+     else if (attrName == aria_checkedAttr)
+         checkedStateChanged(element);
+     else if (attrName == aria_selectedAttr)
+@@ -1491,7 +1493,7 @@ void AXObjectCache::labelChanged(Element* element)
+ {
+     ASSERT(is<HTMLLabelElement>(*element));
+     HTMLElement* correspondingControl = downcast<HTMLLabelElement>(*element).control();
+-    textChanged(correspondingControl);
++    deferTextChangedIfNeeded(correspondingControl);
+ }
+ 
+ void AXObjectCache::recomputeIsIgnored(RenderObject* renderer)
+@@ -2701,29 +2703,43 @@ bool AXObjectCache::nodeIsTextControl(const Node* node)
+     
+ void AXObjectCache::performDeferredCacheUpdate()
+ {
+-    for (auto* renderer : m_deferredCacheUpdateList) {
+-        if (is<RenderBlock>(*renderer))
++    for (auto* node : m_deferredTextChangedList)
++        textChanged(node);
++    m_deferredTextChangedList.clear();
++
++    for (auto* element : m_deferredRecomputeIsIgnoredList) {
++        if (auto* renderer = element->renderer())
+             recomputeIsIgnored(renderer);
+-        else if (is<RenderText>(*renderer))
+-            textChanged(renderer);
+-        else
+-            ASSERT_NOT_REACHED();
+     }
+-    m_deferredCacheUpdateList.clear();
++    m_deferredRecomputeIsIgnoredList.clear();
+ }
+ 
+-void AXObjectCache::recomputeDeferredIsIgnored(RenderBlock& renderer)
++void AXObjectCache::deferRecomputeIsIgnored(Element* element)
+ {
+-    if (renderer.beingDestroyed())
++    if (!element)
++        return;
++
++    if (element->renderer() && element->renderer()->beingDestroyed())
+         return;
+-    m_deferredCacheUpdateList.add(&renderer);
++
++    m_deferredRecomputeIsIgnoredList.add(element);
+ }
+ 
+-void AXObjectCache::deferTextChanged(RenderText& renderer)
++void AXObjectCache::deferTextChangedIfNeeded(Node* node)
+ {
+-    if (renderer.beingDestroyed())
++    if (!node)
+         return;
+-    m_deferredCacheUpdateList.add(&renderer);
++
++    if (node->renderer() && node->renderer()->beingDestroyed())
++        return;
++
++    auto& document = node->document();
++    // FIXME: We should just defer all text changes.
++    if (document.needsStyleRecalc() || document.inRenderTreeUpdate() || (document.view() && document.view()->isInRenderTreeLayout())) {
++        m_deferredTextChangedList.add(node);
++        return;
++    }
++    textChanged(node);
+ }
+ 
+ bool isNodeAriaVisible(Node* node)
+diff --git a/Source/WebCore/accessibility/AXObjectCache.h b/Source/WebCore/accessibility/AXObjectCache.h
+index 19ed0f5d3d1..8c708f67594 100644
+--- a/Source/WebCore/accessibility/AXObjectCache.h
++++ b/Source/WebCore/accessibility/AXObjectCache.h
+@@ -327,8 +327,8 @@ public:
+ #if PLATFORM(MAC)
+     static void setShouldRepostNotificationsForTests(bool value);
+ #endif
+-    void recomputeDeferredIsIgnored(RenderBlock& renderer);
+-    void deferTextChanged(RenderText& renderer);
++    void deferRecomputeIsIgnored(Element*);
++    void deferTextChangedIfNeeded(Node*);
+     void performDeferredCacheUpdate();
+ 
+ protected:
+@@ -431,7 +431,8 @@ private:
+ 
+     AXTextStateChangeIntent m_textSelectionIntent;
+     bool m_isSynchronizingSelection { false };
+-    ListHashSet<RenderObject*> m_deferredCacheUpdateList;
++    ListHashSet<Element*> m_deferredRecomputeIsIgnoredList;
++    ListHashSet<Node*> m_deferredTextChangedList;
+ };
+ 
+ class AXAttributeCacheEnabler
+@@ -493,8 +494,8 @@ inline void AXObjectCache::handleFocusedUIElementChanged(Node*, Node*) { }
+ inline void AXObjectCache::handleScrollbarUpdate(ScrollView*) { }
+ inline void AXObjectCache::handleAttributeChanged(const QualifiedName&, Element*) { }
+ inline void AXObjectCache::recomputeIsIgnored(RenderObject*) { }
+-inline void AXObjectCache::recomputeDeferredIsIgnored(RenderBlock&) { }
+-inline void AXObjectCache::deferTextChanged(RenderText&) { }
++inline void AXObjectCache::deferRecomputeIsIgnored(Element*) { }
++inline void AXObjectCache::deferTextChangedIfNeeded(Node*) { }
+ inline void AXObjectCache::performDeferredCacheUpdate() { }
+ inline void AXObjectCache::handleScrolledToAnchor(const Node*) { }
+ inline void AXObjectCache::postTextStateChangeNotification(Node*, const AXTextStateChangeIntent&, const VisibleSelection&) { }
+diff --git a/Source/WebCore/rendering/RenderBlock.cpp b/Source/WebCore/rendering/RenderBlock.cpp
+index b3b111aa04b..951f658c3e7 100644
+--- a/Source/WebCore/rendering/RenderBlock.cpp
++++ b/Source/WebCore/rendering/RenderBlock.cpp
+@@ -679,7 +679,7 @@ static void getInlineRun(RenderObject* start, RenderObject* boundary,
+ void RenderBlock::deleteLines()
+ {
+     if (AXObjectCache* cache = document().existingAXObjectCache())
+-        cache->recomputeDeferredIsIgnored(*this);
++        cache->deferRecomputeIsIgnored(element());
+ }
+ 
+ void RenderBlock::makeChildrenNonInline(RenderObject* insertionPoint)
+diff --git a/Source/WebCore/rendering/RenderBlockLineLayout.cpp b/Source/WebCore/rendering/RenderBlockLineLayout.cpp
+index 085937b574b..8dd65a5f70c 100644
+--- a/Source/WebCore/rendering/RenderBlockLineLayout.cpp
++++ b/Source/WebCore/rendering/RenderBlockLineLayout.cpp
+@@ -130,7 +130,7 @@ RootInlineBox* RenderBlockFlow::createAndAppendRootInlineBox()
+ 
+     if (UNLIKELY(AXObjectCache::accessibilityEnabled()) && firstRootBox() == rootBox) {
+         if (AXObjectCache* cache = document().existingAXObjectCache())
+-            cache->recomputeDeferredIsIgnored(*this);
++            cache->deferRecomputeIsIgnored(element());
+     }
+ 
+     return rootBox;
+diff --git a/Source/WebCore/rendering/RenderText.cpp b/Source/WebCore/rendering/RenderText.cpp
+index be82e72d2b0..8a7c5745cb6 100644
+--- a/Source/WebCore/rendering/RenderText.cpp
++++ b/Source/WebCore/rendering/RenderText.cpp
+@@ -1305,7 +1305,7 @@ void RenderText::setText(const String& text, bool force)
+         downcast<RenderBlockFlow>(*parent()).invalidateLineLayoutPath();
+     
+     if (AXObjectCache* cache = document().existingAXObjectCache())
+-        cache->deferTextChanged(*this);
++        cache->deferTextChangedIfNeeded(textNode());
+ }
+ 
+ String RenderText::textWithoutConvertingBackslashToYenSymbol() const
+-- 
+2.13.0
+

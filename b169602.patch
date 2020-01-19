@@ -1,0 +1,89 @@
+diff -up webkitgtk-2.14.5/Source/WebKit2/UIProcess/API/gtk/WebKitMimeInfo.cpp.b169602 webkitgtk-2.14.5/Source/WebKit2/UIProcess/API/gtk/WebKitMimeInfo.cpp
+--- webkitgtk-2.14.5/Source/WebKit2/UIProcess/API/gtk/WebKitMimeInfo.cpp.b169602	2017-02-07 09:05:09.000000000 +0100
++++ webkitgtk-2.14.5/Source/WebKit2/UIProcess/API/gtk/WebKitMimeInfo.cpp	2017-03-20 10:42:10.428894078 +0100
+@@ -35,7 +35,7 @@ struct _WebKitMimeInfo {
+     CString description;
+     GRefPtr<GPtrArray> extensions;
+ 
+-    int referenceCount;
++    int referenceCount { 0 };
+ };
+ 
+ G_DEFINE_BOXED_TYPE(WebKitMimeInfo, webkit_mime_info, webkit_mime_info_ref, webkit_mime_info_unref)
+diff -up webkitgtk-2.14.5/Source/WebKit2/UIProcess/API/gtk/WebKitSettings.cpp.b169602 webkitgtk-2.14.5/Source/WebKit2/UIProcess/API/gtk/WebKitSettings.cpp
+--- webkitgtk-2.14.5/Source/WebKit2/UIProcess/API/gtk/WebKitSettings.cpp.b169602	2017-02-07 09:05:09.000000000 +0100
++++ webkitgtk-2.14.5/Source/WebKit2/UIProcess/API/gtk/WebKitSettings.cpp	2017-03-20 10:42:10.428894078 +0100
+@@ -70,8 +70,8 @@ struct _WebKitSettingsPrivate {
+     CString pictographFontFamily;
+     CString defaultCharset;
+     CString userAgent;
+-    bool allowModalDialogs;
+-    bool zoomTextOnly;
++    bool allowModalDialogs { false };
++    bool zoomTextOnly { false };
+ };
+ 
+ /**
+diff -up webkitgtk-2.14.5/Source/WebKit2/UIProcess/API/gtk/WebKitWebViewBase.cpp.b169602 webkitgtk-2.14.5/Source/WebKit2/UIProcess/API/gtk/WebKitWebViewBase.cpp
+--- webkitgtk-2.14.5/Source/WebKit2/UIProcess/API/gtk/WebKitWebViewBase.cpp.b169602	2017-03-20 10:42:10.429894072 +0100
++++ webkitgtk-2.14.5/Source/WebKit2/UIProcess/API/gtk/WebKitWebViewBase.cpp	2017-03-20 10:44:08.585220527 +0100
+@@ -161,42 +161,42 @@ struct _WebKitWebViewBasePrivate {
+     WebKitWebViewChildrenMap children;
+     std::unique_ptr<PageClientImpl> pageClient;
+     RefPtr<WebPageProxy> pageProxy;
+-    bool shouldForwardNextKeyEvent;
+-    bool shouldForwardNextWheelEvent;
++    bool shouldForwardNextKeyEvent { false };
++    bool shouldForwardNextWheelEvent { false };
+     ClickCounter clickCounter;
+     CString tooltipText;
+     IntRect tooltipArea;
+     GRefPtr<AtkObject> accessible;
+-    GtkWidget* authenticationDialog;
+-    GtkWidget* inspectorView;
+-    AttachmentSide inspectorAttachmentSide;
+-    unsigned inspectorViewSize;
++    GtkWidget* authenticationDialog { nullptr };
++    GtkWidget* inspectorView { nullptr };
++    AttachmentSide inspectorAttachmentSide { AttachmentSide::Bottom };
++    unsigned inspectorViewSize { 0 };
+     GUniquePtr<GdkEvent> contextMenuEvent;
+-    WebContextMenuProxyGtk* activeContextMenuProxy;
++    WebContextMenuProxyGtk* activeContextMenuProxy { nullptr };
+     InputMethodFilter inputMethodFilter;
+     KeyBindingTranslator keyBindingTranslator;
+     TouchEventsMap touchEvents;
+     IntSize contentsSize;
+ 
+-    GtkWindow* toplevelOnScreenWindow;
+-    unsigned long toplevelFocusInEventID;
+-    unsigned long toplevelFocusOutEventID;
+-    unsigned long toplevelWindowStateEventID;
+-    unsigned long toplevelWindowRealizedID;
++    GtkWindow* toplevelOnScreenWindow { nullptr };
++    unsigned long toplevelFocusInEventID { 0 };
++    unsigned long toplevelFocusOutEventID { 0 };
++    unsigned long toplevelWindowStateEventID { 0 };
++    unsigned long toplevelWindowRealizedID { 0 };
+ 
+     // View State.
+-    ViewState::Flags viewState;
+-    ViewState::Flags viewStateFlagsToUpdate;
++    ViewState::Flags viewState { 0 };
++    ViewState::Flags viewStateFlagsToUpdate { 0 };
+     RunLoop::Timer<WebKitWebViewBasePrivate> updateViewStateTimer;
+ 
+-    WebKitWebViewBaseDownloadRequestHandler downloadHandler;
++    WebKitWebViewBaseDownloadRequestHandler downloadHandler { 0 };
+ 
+ #if ENABLE(FULLSCREEN_API)
+-    bool fullScreenModeActive;
++    bool fullScreenModeActive { false };
+     WebFullScreenClientGtk fullScreenClient;
+     GRefPtr<GDBusProxy> screenSaverProxy;
+     GRefPtr<GCancellable> screenSaverInhibitCancellable;
+-    unsigned screenSaverCookie;
++    unsigned screenSaverCookie { 0 };
+ #endif
+ 
+     std::unique_ptr<AcceleratedBackingStore> acceleratedBackingStore;

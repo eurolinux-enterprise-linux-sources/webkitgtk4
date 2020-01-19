@@ -1,0 +1,196 @@
+From b51505d941395beec0c6563341f467ffcef311be Mon Sep 17 00:00:00 2001
+From: "zalan@apple.com" <zalan@apple.com@268f45cc-cd09-0410-ab3c-d52691b4dbfc>
+Date: Tue, 2 May 2017 21:29:13 +0000
+Subject: [PATCH] Defer AX cache update when text content changes until after
+ layout is finished. https://bugs.webkit.org/show_bug.cgi?id=171429
+ <rdar://problem/31885984>
+
+Reviewed by Simon Fraser.
+
+Source/WebCore:
+
+When the content of the RenderText changes (even as the result of a text-transform change)
+instead of updating the AX cache eagerly (and trigger layout on a half-backed render tree)
+we should just defer it until after the subsequent layout is done.
+
+Test: accessibility/crash-while-adding-text-child-with-transform.html
+
+* accessibility/AXObjectCache.cpp:
+(WebCore::AXObjectCache::remove):
+(WebCore::AXObjectCache::performDeferredCacheUpdate):
+(WebCore::AXObjectCache::recomputeDeferredIsIgnored):
+(WebCore::AXObjectCache::deferTextChanged):
+(WebCore::AXObjectCache::performDeferredIsIgnoredChange): Deleted.
+* accessibility/AXObjectCache.h:
+(WebCore::AXObjectCache::deferTextChanged):
+(WebCore::AXObjectCache::performDeferredCacheUpdate):
+(WebCore::AXObjectCache::performDeferredIsIgnoredChange): Deleted.
+* page/FrameView.cpp:
+(WebCore::FrameView::performPostLayoutTasks):
+* rendering/RenderText.cpp:
+(WebCore::RenderText::setText):
+
+LayoutTests:
+
+* accessibility/crash-while-adding-text-child-with-transform-expected.txt: Added.
+* accessibility/crash-while-adding-text-child-with-transform.html: Added.
+
+git-svn-id: http://svn.webkit.org/repository/webkit/trunk@216096 268f45cc-cd09-0410-ab3c-d52691b4dbfc
+
+diff --git a/LayoutTests/accessibility/crash-while-adding-text-child-with-transform-expected.txt b/LayoutTests/accessibility/crash-while-adding-text-child-with-transform-expected.txt
+new file mode 100644
+index 00000000000..29afa387782
+--- /dev/null
++++ b/LayoutTests/accessibility/crash-while-adding-text-child-with-transform-expected.txt
+@@ -0,0 +1,2 @@
++pass if no crash or assert.
++
+diff --git a/LayoutTests/accessibility/crash-while-adding-text-child-with-transform.html b/LayoutTests/accessibility/crash-while-adding-text-child-with-transform.html
+new file mode 100644
+index 00000000000..69df3cd74ad
+--- /dev/null
++++ b/LayoutTests/accessibility/crash-while-adding-text-child-with-transform.html
+@@ -0,0 +1,26 @@
++<!DOCTYPE html>
++<html>
++<head>
++<title>This tests that AX can manage text content changes while inside tree mutation.</title>
++<style>
++#foobar {
++    text-transform: lowercase;
++}
++
++#foobar::first-letter {
++	margin: 1px;
++}
++</style>
++<script>
++    if (window.testRunner)
++        testRunner.dumpAsText();
++    if (window.accessibilityController)
++        accessibilityController.accessibleElementById("foobar");
++</script>
++</head>
++<body>
++<div id=foobar>Pass if no crash or assert.</div><span aria-labeledby=foobar id=newParent></span><script>
++    newParent.appendChild(foobar);
++</script>
++</body>
++</html>
+diff --git a/Source/WebCore/accessibility/AXObjectCache.cpp b/Source/WebCore/accessibility/AXObjectCache.cpp
+index f35ef90ba19..7fdb9cf62a1 100644
+--- a/Source/WebCore/accessibility/AXObjectCache.cpp
++++ b/Source/WebCore/accessibility/AXObjectCache.cpp
+@@ -711,8 +711,7 @@ void AXObjectCache::remove(RenderObject* renderer)
+     AXID axID = m_renderObjectMapping.get(renderer);
+     remove(axID);
+     m_renderObjectMapping.remove(renderer);
+-    if (is<RenderBlock>(*renderer))
+-        m_deferredIsIgnoredChangeList.remove(downcast<RenderBlock>(renderer));
++    m_deferredCacheUpdateList.remove(renderer);
+ }
+ 
+ void AXObjectCache::remove(Node* node)
+@@ -2700,16 +2699,27 @@ bool AXObjectCache::nodeIsTextControl(const Node* node)
+     return axObject && axObject->isTextControl();
+ }
+     
+-void AXObjectCache::performDeferredIsIgnoredChange()
++void AXObjectCache::performDeferredCacheUpdate()
+ {
+-    for (auto* renderer : m_deferredIsIgnoredChangeList)
+-        recomputeIsIgnored(renderer);
+-    m_deferredIsIgnoredChangeList.clear();
++    for (auto* renderer : m_deferredCacheUpdateList) {
++        if (is<RenderBlock>(*renderer))
++            recomputeIsIgnored(renderer);
++        else if (is<RenderText>(*renderer))
++            textChanged(renderer);
++        else
++            ASSERT_NOT_REACHED();
++    }
++    m_deferredCacheUpdateList.clear();
+ }
+ 
+ void AXObjectCache::recomputeDeferredIsIgnored(RenderBlock& renderer)
+ {
+-    m_deferredIsIgnoredChangeList.add(&renderer);
++    m_deferredCacheUpdateList.add(&renderer);
++}
++
++void AXObjectCache::deferTextChanged(RenderText& renderer)
++{
++    m_deferredCacheUpdateList.add(&renderer);
+ }
+ 
+ bool isNodeAriaVisible(Node* node)
+diff --git a/Source/WebCore/accessibility/AXObjectCache.h b/Source/WebCore/accessibility/AXObjectCache.h
+index e7c332dd852..19ed0f5d3d1 100644
+--- a/Source/WebCore/accessibility/AXObjectCache.h
++++ b/Source/WebCore/accessibility/AXObjectCache.h
+@@ -45,6 +45,7 @@ class Node;
+ class Page;
+ class RenderBlock;
+ class RenderObject;
++class RenderText;
+ class ScrollView;
+ class VisiblePosition;
+ class Widget;
+@@ -327,7 +328,8 @@ public:
+     static void setShouldRepostNotificationsForTests(bool value);
+ #endif
+     void recomputeDeferredIsIgnored(RenderBlock& renderer);
+-    void performDeferredIsIgnoredChange();
++    void deferTextChanged(RenderText& renderer);
++    void performDeferredCacheUpdate();
+ 
+ protected:
+     void postPlatformNotification(AccessibilityObject*, AXNotification);
+@@ -429,7 +431,7 @@ private:
+ 
+     AXTextStateChangeIntent m_textSelectionIntent;
+     bool m_isSynchronizingSelection { false };
+-    ListHashSet<RenderBlock*> m_deferredIsIgnoredChangeList;
++    ListHashSet<RenderObject*> m_deferredCacheUpdateList;
+ };
+ 
+ class AXAttributeCacheEnabler
+@@ -492,7 +494,8 @@ inline void AXObjectCache::handleScrollbarUpdate(ScrollView*) { }
+ inline void AXObjectCache::handleAttributeChanged(const QualifiedName&, Element*) { }
+ inline void AXObjectCache::recomputeIsIgnored(RenderObject*) { }
+ inline void AXObjectCache::recomputeDeferredIsIgnored(RenderBlock&) { }
+-inline void AXObjectCache::performDeferredIsIgnoredChange() { }
++inline void AXObjectCache::deferTextChanged(RenderText&) { }
++inline void AXObjectCache::performDeferredCacheUpdate() { }
+ inline void AXObjectCache::handleScrolledToAnchor(const Node*) { }
+ inline void AXObjectCache::postTextStateChangeNotification(Node*, const AXTextStateChangeIntent&, const VisibleSelection&) { }
+ inline void AXObjectCache::postTextStateChangeNotification(Node*, AXTextEditType, const String&, const VisiblePosition&) { }
+diff --git a/Source/WebCore/page/FrameView.cpp b/Source/WebCore/page/FrameView.cpp
+index e0541dc722b..7f3fe56ce86 100644
+--- a/Source/WebCore/page/FrameView.cpp
++++ b/Source/WebCore/page/FrameView.cpp
+@@ -3553,7 +3553,7 @@ void FrameView::performPostLayoutTasks()
+     updateScrollSnapState();
+ 
+     if (AXObjectCache* cache = frame().document()->existingAXObjectCache())
+-        cache->performDeferredIsIgnoredChange();
++        cache->performDeferredCacheUpdate();
+ }
+ 
+ IntSize FrameView::sizeForResizeEvent() const
+diff --git a/Source/WebCore/rendering/RenderText.cpp b/Source/WebCore/rendering/RenderText.cpp
+index 2348b3cd53e..72b1c0248b9 100644
+--- a/Source/WebCore/rendering/RenderText.cpp
++++ b/Source/WebCore/rendering/RenderText.cpp
+@@ -1281,7 +1281,7 @@ void RenderText::setText(const String& text, bool force)
+         downcast<RenderBlockFlow>(*parent()).invalidateLineLayoutPath();
+     
+     if (AXObjectCache* cache = document().existingAXObjectCache())
+-        cache->textChanged(this);
++        cache->deferTextChanged(*this);
+ }
+ 
+ String RenderText::textWithoutConvertingBackslashToYenSymbol() const
+-- 
+2.13.0
+

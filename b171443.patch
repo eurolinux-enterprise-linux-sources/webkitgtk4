@@ -1,0 +1,264 @@
+diff -up webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityNodeObject.cpp.b171443 webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityNodeObject.cpp
+--- webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityNodeObject.cpp.b171443	2017-02-07 09:05:08.000000000 +0100
++++ webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityNodeObject.cpp	2017-05-18 14:33:09.106642301 +0200
+@@ -96,6 +96,7 @@ AccessibilityNodeObject::AccessibilityNo
+     : AccessibilityObject()
+     , m_ariaRole(UnknownRole)
+     , m_childrenDirty(false)
++    , m_subtreeDirty(false)
+     , m_roleForMSAA(UnknownRole)
+ #ifndef NDEBUG
+     , m_initialized(false)
+@@ -140,13 +141,19 @@ void AccessibilityNodeObject::childrenCh
+     if (!cache)
+         return;
+     cache->postNotification(this, document(), AXObjectCache::AXChildrenChanged);
++    
++    // Should make the sub tree dirty so that everything below will be updated correctly.
++    this->setNeedsToUpdateSubtree();
++    bool shouldStopUpdatingParent = false;
+ 
+     // Go up the accessibility parent chain, but only if the element already exists. This method is
+     // called during render layouts, minimal work should be done. 
+     // If AX elements are created now, they could interrogate the render tree while it's in a funky state.
+     // At the same time, process ARIA live region changes.
+     for (AccessibilityObject* parent = this; parent; parent = parent->parentObjectIfExists()) {
+-        parent->setNeedsToUpdateChildren();
++        if (!shouldStopUpdatingParent)
++            parent->setNeedsToUpdateChildren();
++        
+ 
+         // These notifications always need to be sent because screenreaders are reliant on them to perform. 
+         // In other words, they need to be sent even when the screen reader has not accessed this live region since the last update.
+@@ -159,8 +166,13 @@ void AccessibilityNodeObject::childrenCh
+             cache->postLiveRegionChangeNotification(parent);
+         
+         // If this element is an ARIA text control, notify the AT of changes.
+-        if (parent->isNonNativeTextControl())
++        if (parent->isNonNativeTextControl()) {
+             cache->postNotification(parent, parent->document(), AXObjectCache::AXValueChanged);
++            
++            // Do not let the parent that's above the editable ancestor update its children
++            // since we already notify the AT of changes.
++            shouldStopUpdatingParent = true;
++        }
+     }
+ }
+ 
+@@ -344,8 +356,24 @@ void AccessibilityNodeObject::insertChil
+     // If the parent is asking for this child's children, then either it's the first time (and clearing is a no-op),
+     // or its visibility has changed. In the latter case, this child may have a stale child cached.
+     // This can prevent aria-hidden changes from working correctly. Hence, whenever a parent is getting children, ensure data is not stale.
+-    child->clearChildren();
++    // Only clear the child's children when we know it's in the updating chain in order to avoid unnecessary work.
++    if (child->needsToUpdateChildren() || m_subtreeDirty) {
++        child->clearChildren();
++        // Pass m_subtreeDirty flag down to the child so that children cache gets reset properly.
++        if (m_subtreeDirty)
++            child->setNeedsToUpdateSubtree();
++    } else {
++        // For some reason the grand children might be detached so that we need to regenerate the
++        // children list of this child.
++        for (const auto& grandChild : child->children(false)) {
++            if (grandChild->isDetachedFromParent()) {
++                child->clearChildren();
++                break;
++            }
++        }
++    }
+     
++    setIsIgnoredFromParentDataForChild(child);
+     if (child->accessibilityIsIgnored()) {
+         const auto& children = child->children();
+         size_t length = children.size();
+@@ -355,6 +383,9 @@ void AccessibilityNodeObject::insertChil
+         ASSERT(child->parentObject() == this);
+         m_children.insert(index, child);
+     }
++    
++    // Reset the child's m_isIgnoredFromParentData since we are done adding that child and its children.
++    child->clearIsIgnoredFromParentData();
+ }
+ 
+ void AccessibilityNodeObject::addChild(AccessibilityObject* child)
+@@ -379,6 +410,8 @@ void AccessibilityNodeObject::addChildre
+     
+     for (Node* child = m_node->firstChild(); child; child = child->nextSibling())
+         addChild(axObjectCache()->getOrCreate(child));
++    
++    m_subtreeDirty = false;
+ }
+ 
+ bool AccessibilityNodeObject::canHaveChildren() const
+@@ -1049,6 +1082,9 @@ Element* AccessibilityNodeObject::mouseB
+ 
+ bool AccessibilityNodeObject::isDescendantOfBarrenParent() const
+ {
++    if (!m_isIgnoredFromParentData.isNull())
++        return m_isIgnoredFromParentData.isDescendantOfBarrenParent;
++    
+     for (AccessibilityObject* object = parentObject(); object; object = object->parentObject()) {
+         if (!object->canHaveChildren())
+             return true;
+diff -up webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityNodeObject.h.b171443 webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityNodeObject.h
+--- webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityNodeObject.h.b171443	2017-02-07 09:05:08.000000000 +0100
++++ webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityNodeObject.h	2017-05-18 14:33:09.107642296 +0200
+@@ -162,6 +162,7 @@ protected:
+ 
+     AccessibilityRole m_ariaRole;
+     bool m_childrenDirty;
++    bool m_subtreeDirty;
+     mutable AccessibilityRole m_roleForMSAA;
+ #ifndef NDEBUG
+     bool m_initialized;
+diff -up webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityObject.cpp.b171443 webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityObject.cpp
+--- webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityObject.cpp.b171443	2017-02-07 09:05:08.000000000 +0100
++++ webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityObject.cpp	2017-05-18 14:34:02.282342082 +0200
+@@ -86,6 +86,7 @@ AccessibilityObject::AccessibilityObject
+     , m_haveChildren(false)
+     , m_role(UnknownRole)
+     , m_lastKnownIsIgnoredValue(DefaultBehavior)
++    , m_isIgnoredFromParentData(AccessibilityIsIgnoredFromParentData())
+ #if PLATFORM(GTK) || (PLATFORM(EFL) && HAVE(ACCESSIBILITY))
+     , m_wrapper(nullptr)
+ #endif
+@@ -2944,13 +2945,15 @@ bool AccessibilityObject::isDOMHidden()
+ 
+ AccessibilityObjectInclusion AccessibilityObject::defaultObjectInclusion() const
+ {
+-    if (isARIAHidden())
++    bool useParentData = !m_isIgnoredFromParentData.isNull();
++    
++    if (useParentData ? m_isIgnoredFromParentData.isARIAHidden : isARIAHidden())
+         return IgnoreObject;
+     
+     if (ignoredFromARIAModalPresence())
+         return IgnoreObject;
+     
+-    if (isPresentationalChildOfAriaRole())
++    if (useParentData ? m_isIgnoredFromParentData.isPresentationalChildOfAriaRole : isPresentationalChildOfAriaRole())
+         return IgnoreObject;
+     
+     return accessibilityPlatformIncludesObject();
+@@ -3140,4 +3143,23 @@ void AccessibilityObject::ariaOwnsElemen
+     ariaElementsFromAttribute(axObjects, aria_ownsAttr);
+ }
+ 
++void AccessibilityObject::setIsIgnoredFromParentDataForChild(AccessibilityObject* child)
++{
++    if (!child || child->parentObject() != this)
++        return;
++    
++    AccessibilityIsIgnoredFromParentData result = AccessibilityIsIgnoredFromParentData(this);
++    if (!m_isIgnoredFromParentData.isNull()) {
++        result.isARIAHidden = m_isIgnoredFromParentData.isARIAHidden || equalLettersIgnoringASCIICase(child->getAttribute(aria_hiddenAttr), "true");
++        result.isPresentationalChildOfAriaRole = m_isIgnoredFromParentData.isPresentationalChildOfAriaRole || ariaRoleHasPresentationalChildren();
++        result.isDescendantOfBarrenParent = m_isIgnoredFromParentData.isDescendantOfBarrenParent || !canHaveChildren();
++    } else {
++        result.isARIAHidden = child->isARIAHidden();
++        result.isPresentationalChildOfAriaRole = child->isPresentationalChildOfAriaRole();
++        result.isDescendantOfBarrenParent = child->isDescendantOfBarrenParent();
++    }
++    
++    child->setIsIgnoredFromParentData(result);
++}
++
+ } // namespace WebCore
+diff -up webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityObject.h.b171443 webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityObject.h
+--- webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityObject.h.b171443	2017-02-07 09:05:08.000000000 +0100
++++ webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityObject.h	2017-05-18 14:35:09.017965306 +0200
+@@ -284,6 +284,24 @@ struct AccessibilityTextUnderElementMode
+         , ignoredChildNode(ignored)
+         { }
+ };
++
++// Use this struct to store the isIgnored data that depends on the parents, so that in addChildren()
++// we avoid going up the parent chain for each element while traversing the tree with useful information already.
++struct AccessibilityIsIgnoredFromParentData {
++    AccessibilityObject* parent;
++    bool isARIAHidden;
++    bool isPresentationalChildOfAriaRole;
++    bool isDescendantOfBarrenParent;
++    
++    AccessibilityIsIgnoredFromParentData(AccessibilityObject* parent = nullptr)
++        : parent(parent)
++        , isARIAHidden(false)
++        , isPresentationalChildOfAriaRole(false)
++        , isDescendantOfBarrenParent(false)
++        { }
++    
++    bool isNull() const { return !parent; }
++};
+     
+ enum AccessibilityOrientation {
+     AccessibilityOrientationVertical,
+@@ -809,7 +827,9 @@ public:
+     virtual bool hasChildren() const { return m_haveChildren; }
+     virtual void updateChildrenIfNecessary();
+     virtual void setNeedsToUpdateChildren() { }
++    virtual void setNeedsToUpdateSubtree() { }
+     virtual void clearChildren();
++    virtual bool needsToUpdateChildren() const { return false; }
+ #if PLATFORM(COCOA)
+     virtual void detachFromParent();
+ #else
+@@ -1061,12 +1081,18 @@ public:
+     AccessibilityObject* editableAncestor();
+     AccessibilityObject* highestEditableAncestor();
+     
++    void clearIsIgnoredFromParentData() { m_isIgnoredFromParentData = AccessibilityIsIgnoredFromParentData(); }
++    void setIsIgnoredFromParentDataForChild(AccessibilityObject*);
++
+ protected:
+     AXID m_id;
+     AccessibilityChildrenVector m_children;
+     mutable bool m_haveChildren;
+     AccessibilityRole m_role;
+     AccessibilityObjectInclusion m_lastKnownIsIgnoredValue;
++    AccessibilityIsIgnoredFromParentData m_isIgnoredFromParentData;
++
++    void setIsIgnoredFromParentData(AccessibilityIsIgnoredFromParentData& data) { m_isIgnoredFromParentData = data; }
+ 
+     virtual bool computeAccessibilityIsIgnored() const { return true; }
+ 
+diff -up webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityRenderObject.cpp.b171443 webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityRenderObject.cpp
+--- webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityRenderObject.cpp.b171443	2017-05-18 14:33:09.084642426 +0200
++++ webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityRenderObject.cpp	2017-05-18 14:33:09.112642267 +0200
+@@ -2930,7 +2930,7 @@ void AccessibilityRenderObject::addImage
+ void AccessibilityRenderObject::updateChildrenIfNecessary()
+ {
+     if (needsToUpdateChildren())
+-        clearChildren();        
++        clearChildren();
+     
+     AccessibilityObject::updateChildrenIfNecessary();
+ }
+@@ -3155,6 +3155,8 @@ void AccessibilityRenderObject::addChild
+     for (RefPtr<AccessibilityObject> obj = firstChild(); obj; obj = obj->nextSibling())
+         addChild(obj.get());
+     
++    m_subtreeDirty = false;
++    
+     addHiddenChildren();
+     addAttachmentChildren();
+     addImageMapChildren();
+diff -up webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityRenderObject.h.b171443 webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityRenderObject.h
+--- webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityRenderObject.h.b171443	2017-02-07 09:05:08.000000000 +0100
++++ webkitgtk-2.14.6/Source/WebCore/accessibility/AccessibilityRenderObject.h	2017-05-18 14:33:09.113642262 +0200
+@@ -206,7 +206,6 @@ public:
+ protected:
+     explicit AccessibilityRenderObject(RenderObject*);
+     void setRenderObject(RenderObject* renderer) { m_renderer = renderer; }
+-    bool needsToUpdateChildren() const { return m_childrenDirty; }
+     ScrollableArea* getScrollableAreaIfScrollable() const override;
+     void scrollTo(const IntPoint&) const override;
+     
+@@ -232,6 +231,8 @@ private:
+     Element* rootEditableElementForPosition(const Position&) const;
+     bool nodeIsTextControl(const Node*) const;
+     void setNeedsToUpdateChildren() override { m_childrenDirty = true; }
++    bool needsToUpdateChildren() const override { return m_childrenDirty; }
++    void setNeedsToUpdateSubtree() override { m_subtreeDirty = true; }
+     Path elementPath() const override;
+     
+     bool isTabItemSelected() const;
