@@ -40,14 +40,15 @@ public:
 class GraphicsContext;
 
 class RenderSVGResourceGradient : public RenderSVGResourceContainer {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGResourceGradient);
 public:
     SVGGradientElement& gradientElement() const { return static_cast<SVGGradientElement&>(RenderSVGResourceContainer::element()); }
 
     void removeAllClientsFromCache(bool markForInvalidation = true) final;
     void removeClientFromCache(RenderElement&, bool markForInvalidation = true) final;
 
-    bool applyResource(RenderElement&, const RenderStyle&, GraphicsContext*&, unsigned short resourceMode) final;
-    void postApplyResource(RenderElement&, GraphicsContext*&, unsigned short resourceMode, const Path*, const RenderSVGShape*) final;
+    bool applyResource(RenderElement&, const RenderStyle&, GraphicsContext*&, OptionSet<RenderSVGResourceMode>) final;
+    void postApplyResource(RenderElement&, GraphicsContext*&, OptionSet<RenderSVGResourceMode>, const Path*, const RenderSVGShape*) final;
     FloatRect resourceBoundingBox(const RenderObject&) final { return FloatRect(); }
 
 protected:
@@ -65,13 +66,14 @@ protected:
     GradientSpreadMethod platformSpreadMethodFromSVGType(SVGSpreadMethodType) const;
 
 private:
-    bool m_shouldCollectGradientAttributes : 1;
     HashMap<RenderObject*, std::unique_ptr<GradientData>> m_gradientMap;
 
 #if USE(CG)
-    GraphicsContext* m_savedContext;
+    GraphicsContext* m_savedContext { nullptr };
     std::unique_ptr<ImageBuffer> m_imageBuffer;
 #endif
+
+    bool m_shouldCollectGradientAttributes { true };
 };
 
 } // namespace WebCore

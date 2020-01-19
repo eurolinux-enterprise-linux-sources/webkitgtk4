@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -55,9 +55,7 @@ void LazySlowPath::generate(CodeBlock* codeBlock)
 {
     RELEASE_ASSERT(!m_stub);
 
-    VM& vm = *codeBlock->vm();
-
-    CCallHelpers jit(&vm, codeBlock);
+    CCallHelpers jit(codeBlock);
     GenerationParams params;
     CCallHelpers::JumpList exceptionJumps;
     params.exceptionJumps = m_exceptionTarget ? &exceptionJumps : nullptr;
@@ -65,11 +63,11 @@ void LazySlowPath::generate(CodeBlock* codeBlock)
 
     m_generator->run(jit, params);
 
-    LinkBuffer linkBuffer(vm, jit, codeBlock, JITCompilationMustSucceed);
+    LinkBuffer linkBuffer(jit, codeBlock, JITCompilationMustSucceed);
     linkBuffer.link(params.doneJumps, m_done);
     if (m_exceptionTarget)
         linkBuffer.link(exceptionJumps, m_exceptionTarget);
-    m_stub = FINALIZE_CODE_FOR(codeBlock, linkBuffer, ("Lazy slow path call stub"));
+    m_stub = FINALIZE_CODE_FOR(codeBlock, linkBuffer, "Lazy slow path call stub");
 
     MacroAssembler::repatchJump(m_patchableJump, CodeLocationLabel(m_stub.code()));
 }

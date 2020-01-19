@@ -30,18 +30,20 @@
 #include "CSSCalculationValue.h"
 #include "CSSContentDistributionValue.h"
 #include "CSSFontFeatureValue.h"
+#include "CSSFontStyleValue.h"
 #include "CSSFontVariationValue.h"
 #include "CSSFunctionValue.h"
 #include "CSSGridAutoRepeatValue.h"
 #include "CSSGridLineNamesValue.h"
-#include "CSSGridTemplateAreasValue.h"
 #include "CSSImageGeneratorValue.h"
 #include "CSSImageSetValue.h"
 #include "CSSImageValue.h"
 #include "CSSPrimitiveValue.h"
+#include "CSSPrimitiveValueMappings.h"
 #include "CSSReflectValue.h"
+#include "FontSelectionValueInlines.h"
 #include "Frame.h"
-#include "LayoutUnit.h"
+#include "GridPositionsResolver.h"
 #include "Length.h"
 #include "Pair.h"
 #include "QuotesData.h"
@@ -114,6 +116,12 @@ public:
     static bool convertOverflowScrolling(StyleResolver&, const CSSValue&);
 #endif
     static FontFeatureSettings convertFontFeatureSettings(StyleResolver&, const CSSValue&);
+    static FontSelectionValue convertFontWeightFromValue(const CSSValue&);
+    static FontSelectionValue convertFontStretchFromValue(const CSSValue&);
+    static FontSelectionValue convertFontStyleFromValue(const CSSValue&);
+    static FontSelectionValue convertFontWeight(StyleResolver&, const CSSValue&);
+    static FontSelectionValue convertFontStretch(StyleResolver&, const CSSValue&);
+    static FontSelectionValue convertFontStyle(StyleResolver&, const CSSValue&);
 #if ENABLE(VARIATION_FONTS)
     static FontVariationSettings convertFontVariationSettings(StyleResolver&, const CSSValue&);
 #endif
@@ -135,15 +143,15 @@ public:
     static BreakInside convertPageBreakInside(StyleResolver&, const CSSValue&);
     static BreakBetween convertColumnBreakBetween(StyleResolver&, const CSSValue&);
     static BreakInside convertColumnBreakInside(StyleResolver&, const CSSValue&);
-#if ENABLE(CSS_REGIONS)
-    static BreakBetween convertRegionBreakBetween(StyleResolver&, const CSSValue&);
-    static BreakInside convertRegionBreakInside(StyleResolver&, const CSSValue&);
-#endif
-    
+
     static HangingPunctuation convertHangingPunctuation(StyleResolver&, const CSSValue&);
+
+    static ESpeakAs convertSpeakAs(StyleResolver&, const CSSValue&);
 
     static Length convertPositionComponentX(StyleResolver&, const CSSValue&);
     static Length convertPositionComponentY(StyleResolver&, const CSSValue&);
+
+    static GapLength convertGapLength(StyleResolver&, const CSSValue&);
     
 private:
     friend class StyleBuilderCustom;
@@ -207,12 +215,15 @@ inline Length StyleBuilderConverter::convertLengthSizing(StyleResolver& styleRes
         return Length(Intrinsic);
     case CSSValueMinIntrinsic:
         return Length(MinIntrinsic);
+    case CSSValueMinContent:
     case CSSValueWebkitMinContent:
         return Length(MinContent);
+    case CSSValueMaxContent:
     case CSSValueWebkitMaxContent:
         return Length(MaxContent);
     case CSSValueWebkitFillAvailable:
         return Length(FillAvailable);
+    case CSSValueFitContent:
     case CSSValueWebkitFitContent:
         return Length(FitContent);
     case CSSValueAuto:
@@ -311,9 +322,11 @@ inline Length StyleBuilderConverter::convertTo100PercentMinusLength(const Length
         return Length(100 - length.value(), Percent);
     
     // Turn this into a calc expression: calc(100% - length)
-    auto lhs = std::make_unique<CalcExpressionLength>(Length(100, Percent));
-    auto rhs = std::make_unique<CalcExpressionLength>(length);
-    auto op = std::make_unique<CalcExpressionBinaryOperation>(WTFMove(lhs), WTFMove(rhs), CalcSubtract);
+    Vector<std::unique_ptr<CalcExpressionNode>> lengths;
+    lengths.reserveInitialCapacity(2);
+    lengths.uncheckedAppend(std::make_unique<CalcExpressionLength>(Length(100, Percent)));
+    lengths.uncheckedAppend(std::make_unique<CalcExpressionLength>(length));
+    auto op = std::make_unique<CalcExpressionOperation>(WTFMove(lengths), CalcSubtract);
     return Length(CalculationValue::create(WTFMove(op), ValueRangeAll));
 }
 
@@ -446,14 +459,14 @@ inline String StyleBuilderConverter::convertString(StyleResolver&, const CSSValu
 inline String StyleBuilderConverter::convertStringOrAuto(StyleResolver& styleResolver, const CSSValue& value)
 {
     if (downcast<CSSPrimitiveValue>(value).valueID() == CSSValueAuto)
-        return nullAtom;
+        return nullAtom();
     return convertString(styleResolver, value);
 }
 
 inline String StyleBuilderConverter::convertStringOrNone(StyleResolver& styleResolver, const CSSValue& value)
 {
     if (downcast<CSSPrimitiveValue>(value).valueID() == CSSValueNone)
-        return nullAtom;
+        return nullAtom();
     return convertString(styleResolver, value);
 }
 
@@ -831,10 +844,10 @@ inline ScrollSnapAlign StyleBuilderConverter::convertScrollSnapAlign(StyleResolv
 
 inline GridLength StyleBuilderConverter::createGridTrackBreadth(const CSSPrimitiveValue& primitiveValue, StyleResolver& styleResolver)
 {
-    if (primitiveValue.valueID() == CSSValueWebkitMinContent)
+    if (primitiveValue.valueID() == CSSValueMinContent || primitiveValue.valueID() == CSSValueWebkitMinContent)
         return Length(MinContent);
 
-    if (primitiveValue.valueID() == CSSValueWebkitMaxContent)
+    if (primitiveValue.valueID() == CSSValueMaxContent || primitiveValue.valueID() == CSSValueWebkitMaxContent)
         return Length(MaxContent);
 
     // Fractional unit.
@@ -900,7 +913,7 @@ inline bool StyleBuilderConverter::createGridTrackList(const CSSValue& value, Tr
 
     unsigned currentNamedGridLine = 0;
     for (auto& currentValue : downcast<CSSValueList>(value)) {
-        if (is<CSSGridLineNamesValue>(currentValue.get())) {
+        if (is<CSSGridLineNamesValue>(currentValue)) {
             createGridLineNamesList(currentValue.get(), currentNamedGridLine, tracksData.m_namedGridLines, tracksData.m_orderedNamedGridLines);
             continue;
         }
@@ -912,7 +925,7 @@ inline bool StyleBuilderConverter::createGridTrackList(const CSSValue& value, Tr
             ASSERT(autoRepeatID == CSSValueAutoFill || autoRepeatID == CSSValueAutoFit);
             tracksData.m_autoRepeatType = autoRepeatID == CSSValueAutoFill ? AutoFill : AutoFit;
             for (auto& autoRepeatValue : downcast<CSSValueList>(currentValue.get())) {
-                if (is<CSSGridLineNamesValue>(autoRepeatValue.get())) {
+                if (is<CSSGridLineNamesValue>(autoRepeatValue)) {
                     createGridLineNamesList(autoRepeatValue.get(), autoRepeatIndex, tracksData.m_autoRepeatNamedGridLines, tracksData.m_autoRepeatOrderedNamedGridLines);
                     continue;
                 }
@@ -1153,6 +1166,79 @@ inline FontFeatureSettings StyleBuilderConverter::convertFontFeatureSettings(Sty
     return settings;
 }
 
+inline FontSelectionValue StyleBuilderConverter::convertFontWeightFromValue(const CSSValue& value)
+{
+    ASSERT(is<CSSPrimitiveValue>(value));
+    auto& primitiveValue = downcast<CSSPrimitiveValue>(value);
+
+    if (primitiveValue.isNumber())
+        return FontSelectionValue::clampFloat(primitiveValue.floatValue());
+
+    ASSERT(primitiveValue.isValueID());
+    switch (primitiveValue.valueID()) {
+    case CSSValueNormal:
+        return normalWeightValue();
+    case CSSValueBold:
+    case CSSValueBolder:
+        return boldWeightValue();
+    case CSSValueLighter:
+        return lightWeightValue();
+    default:
+        ASSERT_NOT_REACHED();
+        return normalWeightValue();
+    }
+}
+
+inline FontSelectionValue StyleBuilderConverter::convertFontStretchFromValue(const CSSValue& value)
+{
+    ASSERT(is<CSSPrimitiveValue>(value));
+    const auto& primitiveValue = downcast<CSSPrimitiveValue>(value);
+
+    if (primitiveValue.isPercentage())
+        return FontSelectionValue::clampFloat(primitiveValue.floatValue());
+
+    ASSERT(primitiveValue.isValueID());
+    if (auto value = fontStretchValue(primitiveValue.valueID()))
+        return value.value();
+    ASSERT_NOT_REACHED();
+    return normalStretchValue();
+}
+
+inline FontSelectionValue StyleBuilderConverter::convertFontStyleFromValue(const CSSValue& value)
+{
+    ASSERT(is<CSSFontStyleValue>(value));
+    const auto& fontStyleValue = downcast<CSSFontStyleValue>(value);
+
+    auto valueID = fontStyleValue.fontStyleValue->valueID();
+    if (valueID == CSSValueNormal)
+        return normalItalicValue();
+    if (valueID == CSSValueItalic)
+        return italicValue();
+    ASSERT(valueID == CSSValueOblique);
+    if (auto* obliqueValue = fontStyleValue.obliqueValue.get())
+        return FontSelectionValue(obliqueValue->value<float>(CSSPrimitiveValue::CSS_DEG));
+    return italicValue();
+}
+
+inline FontSelectionValue StyleBuilderConverter::convertFontWeight(StyleResolver& styleResolver, const CSSValue& value)
+{
+    ASSERT(is<CSSPrimitiveValue>(value));
+    auto& primitiveValue = downcast<CSSPrimitiveValue>(value);
+    if (primitiveValue.isValueID()) {
+        auto valueID = primitiveValue.valueID();
+        if (valueID == CSSValueBolder)
+            return FontCascadeDescription::bolderWeight(styleResolver.parentStyle()->fontDescription().weight());
+        if (valueID == CSSValueLighter)
+            return FontCascadeDescription::lighterWeight(styleResolver.parentStyle()->fontDescription().weight());
+    }
+    return convertFontWeightFromValue(value);
+}
+
+inline FontSelectionValue StyleBuilderConverter::convertFontStretch(StyleResolver&, const CSSValue& value)
+{
+    return convertFontStretchFromValue(value);
+}
+
 #if ENABLE(VARIATION_FONTS)
 inline FontVariationSettings StyleBuilderConverter::convertFontVariationSettings(StyleResolver&, const CSSValue& value)
 {
@@ -1222,20 +1308,20 @@ inline PaintOrder StyleBuilderConverter::convertPaintOrder(StyleResolver&, const
 {
     if (is<CSSPrimitiveValue>(value)) {
         ASSERT(downcast<CSSPrimitiveValue>(value).valueID() == CSSValueNormal);
-        return PaintOrderNormal;
+        return PaintOrder::Normal;
     }
 
     auto& orderTypeList = downcast<CSSValueList>(value);
     switch (downcast<CSSPrimitiveValue>(*orderTypeList.itemWithoutBoundsCheck(0)).valueID()) {
     case CSSValueFill:
-        return orderTypeList.length() > 1 ? PaintOrderFillMarkers : PaintOrderFill;
+        return orderTypeList.length() > 1 ? PaintOrder::FillMarkers : PaintOrder::Fill;
     case CSSValueStroke:
-        return orderTypeList.length() > 1 ? PaintOrderStrokeMarkers : PaintOrderStroke;
+        return orderTypeList.length() > 1 ? PaintOrder::StrokeMarkers : PaintOrder::Stroke;
     case CSSValueMarkers:
-        return orderTypeList.length() > 1 ? PaintOrderMarkersStroke : PaintOrderMarkers;
+        return orderTypeList.length() > 1 ? PaintOrder::MarkersStroke : PaintOrder::Markers;
     default:
         ASSERT_NOT_REACHED();
-        return PaintOrderNormal;
+        return PaintOrder::Normal;
     }
 }
 
@@ -1271,9 +1357,13 @@ inline StyleSelfAlignmentData StyleBuilderConverter::convertSelfOrDefaultAlignme
         if (pairValue->first()->valueID() == CSSValueLegacy) {
             alignmentData.setPositionType(LegacyPosition);
             alignmentData.setPosition(*pairValue->second());
+        } else if (pairValue->first()->valueID() == CSSValueFirst) {
+            alignmentData.setPosition(ItemPositionBaseline);
+        } else if (pairValue->first()->valueID() == CSSValueLast) {
+            alignmentData.setPosition(ItemPositionLastBaseline);
         } else {
-            alignmentData.setPosition(*pairValue->first());
-            alignmentData.setOverflow(*pairValue->second());
+            alignmentData.setOverflow(*pairValue->first());
+            alignmentData.setPosition(*pairValue->second());
         }
     } else
         alignmentData.setPosition(primitiveValue);
@@ -1346,14 +1436,22 @@ inline std::optional<Length> StyleBuilderConverter::convertLineHeight(StyleResol
             length = Length(length.value() * multiplier, Fixed);
         return length;
     }
+
+    // Line-height percentages need to inherit as if they were Fixed pixel values. In the example:
+    // <div style="font-size: 10px; line-height: 150%;"><div style="font-size: 100px;"></div></div>
+    // the inner element should have line-height of 15px. However, in this example:
+    // <div style="font-size: 10px; line-height: 1.5;"><div style="font-size: 100px;"></div></div>
+    // the inner element should have a line-height of 150px. Therefore, we map percentages to Fixed
+    // values and raw numbers to percentages.
     if (primitiveValue.isPercentage()) {
         // FIXME: percentage should not be restricted to an integer here.
         return Length((styleResolver.style()->computedFontSize() * primitiveValue.intValue()) / 100, Fixed);
     }
-    if (primitiveValue.isNumber()) {
-        // FIXME: number and percentage values should produce the same type of Length (ie. Fixed or Percent).
-        return Length(primitiveValue.doubleValue() * multiplier * 100.0, Percent);
-    }
+    if (primitiveValue.isNumber())
+        return Length(primitiveValue.doubleValue() * 100.0, Percent);
+
+    // FIXME: The parser should only emit the above types, so this should never be reached. We should change the
+    // type of this function to return just a Length (and not an Optional).
     return std::nullopt;
 }
 
@@ -1421,26 +1519,16 @@ inline BreakInside StyleBuilderConverter::convertColumnBreakInside(StyleResolver
         return AvoidColumnBreakInside;
     return primitiveValue;
 }
-
-#if ENABLE(CSS_REGIONS)
-inline BreakBetween StyleBuilderConverter::convertRegionBreakBetween(StyleResolver&, const CSSValue& value)
+    
+inline ESpeakAs StyleBuilderConverter::convertSpeakAs(StyleResolver&, const CSSValue& value)
 {
-    auto& primitiveValue = downcast<CSSPrimitiveValue>(value);
-    if (primitiveValue.valueID() == CSSValueAlways)
-        return RegionBreakBetween;
-    if (primitiveValue.valueID() == CSSValueAvoid)
-        return AvoidRegionBreakBetween;
-    return primitiveValue;
+    ESpeakAs result = RenderStyle::initialSpeakAs();
+    if (is<CSSValueList>(value)) {
+        for (auto& currentValue : downcast<CSSValueList>(value))
+            result |= downcast<CSSPrimitiveValue>(currentValue.get());
+    }
+    return result;
 }
-
-inline BreakInside StyleBuilderConverter::convertRegionBreakInside(StyleResolver&, const CSSValue& value)
-{
-    auto& primitiveValue = downcast<CSSPrimitiveValue>(value);
-    if (primitiveValue.valueID() == CSSValueAvoid)
-        return AvoidRegionBreakInside;
-    return primitiveValue;
-}
-#endif
 
 inline HangingPunctuation StyleBuilderConverter::convertHangingPunctuation(StyleResolver&, const CSSValue& value)
 {
@@ -1450,6 +1538,11 @@ inline HangingPunctuation StyleBuilderConverter::convertHangingPunctuation(Style
             result |= downcast<CSSPrimitiveValue>(currentValue.get());
     }
     return result;
+}
+
+inline GapLength StyleBuilderConverter::convertGapLength(StyleResolver& styleResolver, const CSSValue& value)
+{
+    return (downcast<CSSPrimitiveValue>(value).valueID() == CSSValueNormal) ? GapLength() : GapLength(convertLength(styleResolver, value));
 }
 
 } // namespace WebCore

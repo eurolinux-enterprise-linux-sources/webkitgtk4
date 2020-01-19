@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2012-2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,30 +30,35 @@
 #include "JSCJSValue.h"
 
 #if CPU(ARM_THUMB2)
+#define TARGET_ASSEMBLER ARMv7Assembler
+#define TARGET_MACROASSEMBLER MacroAssemblerARMv7
 #include "MacroAssemblerARMv7.h"
 namespace JSC { typedef MacroAssemblerARMv7 MacroAssemblerBase; };
 
 #elif CPU(ARM64)
+#define TARGET_ASSEMBLER ARM64Assembler
+#define TARGET_MACROASSEMBLER MacroAssemblerARM64
 #include "MacroAssemblerARM64.h"
-namespace JSC { typedef MacroAssemblerARM64 MacroAssemblerBase; };
 
 #elif CPU(ARM_TRADITIONAL)
+#define TARGET_ASSEMBLER ARMAssembler
+#define TARGET_MACROASSEMBLER MacroAssemblerARM
 #include "MacroAssemblerARM.h"
-namespace JSC { typedef MacroAssemblerARM MacroAssemblerBase; };
 
 #elif CPU(MIPS)
+#define TARGET_ASSEMBLER MIPSAssembler
+#define TARGET_MACROASSEMBLER MacroAssemblerMIPS
 #include "MacroAssemblerMIPS.h"
-namespace JSC {
-typedef MacroAssemblerMIPS MacroAssemblerBase;
-};
 
 #elif CPU(X86)
+#define TARGET_ASSEMBLER X86Assembler
+#define TARGET_MACROASSEMBLER MacroAssemblerX86
 #include "MacroAssemblerX86.h"
-namespace JSC { typedef MacroAssemblerX86 MacroAssemblerBase; };
 
 #elif CPU(X86_64)
+#define TARGET_ASSEMBLER X86Assembler
+#define TARGET_MACROASSEMBLER MacroAssemblerX86_64
 #include "MacroAssemblerX86_64.h"
-namespace JSC { typedef MacroAssemblerX86_64 MacroAssemblerBase; };
 
 #else
 #error "The MacroAssembler is not supported on this platform."
@@ -61,7 +66,32 @@ namespace JSC { typedef MacroAssemblerX86_64 MacroAssemblerBase; };
 
 #include "MacroAssemblerHelpers.h"
 
+namespace WTF {
+
+template<typename FunctionType>
+class ScopedLambda;
+
+} // namespace WTF
+
 namespace JSC {
+
+#if ENABLE(MASM_PROBE)
+namespace Probe {
+
+class Context;
+typedef void (*Function)(Context&);
+
+} // namespace Probe
+#endif // ENABLE(MASM_PROBE)
+
+namespace Printer {
+
+struct PrintRecord;
+typedef Vector<PrintRecord> PrintRecordList;
+
+} // namespace Printer
+
+using MacroAssemblerBase = TARGET_MACROASSEMBLER;
 
 class MacroAssembler : public MacroAssemblerBase {
 public:
@@ -76,19 +106,9 @@ public:
         return static_cast<FPRegisterID>(reg + 1);
     }
     
-    static constexpr unsigned numberOfRegisters()
-    {
-        return lastRegister() - firstRegister() + 1;
-    }
-    
     static constexpr unsigned registerIndex(RegisterID reg)
     {
         return reg - firstRegister();
-    }
-    
-    static constexpr unsigned numberOfFPRegisters()
-    {
-        return lastFPRegister() - firstFPRegister() + 1;
     }
     
     static constexpr unsigned fpRegisterIndex(FPRegisterID reg)
@@ -111,12 +131,13 @@ public:
     using MacroAssemblerBase::branch32;
     using MacroAssemblerBase::compare32;
     using MacroAssemblerBase::move;
+    using MacroAssemblerBase::moveDouble;
     using MacroAssemblerBase::add32;
     using MacroAssemblerBase::mul32;
     using MacroAssemblerBase::and32;
     using MacroAssemblerBase::branchAdd32;
     using MacroAssemblerBase::branchMul32;
-#if CPU(ARM64) || CPU(ARM_THUMB2) || CPU(ARM_TRADITIONAL) || CPU(X86_64)
+#if CPU(ARM64) || CPU(ARM_THUMB2) || CPU(ARM_TRADITIONAL) || CPU(X86_64) || CPU(MIPS)
     using MacroAssemblerBase::branchPtr;
 #endif
     using MacroAssemblerBase::branchSub32;
@@ -136,6 +157,7 @@ public:
     static const double twoToThe32; // This is super useful for some double code.
 
     // Utilities used by the DFG JIT.
+    using AbstractMacroAssemblerBase::invert;
     using MacroAssemblerBase::invert;
     
     static DoubleCondition invert(DoubleCondition cond)
@@ -395,12 +417,12 @@ public:
     }
 
 #if !CPU(ARM_THUMB2) && !CPU(ARM64)
-    PatchableJump patchableBranchPtr(RelationalCondition cond, Address left, TrustedImmPtr right = TrustedImmPtr(0))
+    PatchableJump patchableBranchPtr(RelationalCondition cond, Address left, TrustedImmPtr right = TrustedImmPtr(nullptr))
     {
         return PatchableJump(branchPtr(cond, left, right));
     }
     
-    PatchableJump patchableBranchPtrWithPatch(RelationalCondition cond, Address left, DataLabelPtr& dataLabel, TrustedImmPtr initialRightValue = TrustedImmPtr(0))
+    PatchableJump patchableBranchPtrWithPatch(RelationalCondition cond, Address left, DataLabelPtr& dataLabel, TrustedImmPtr initialRightValue = TrustedImmPtr(nullptr))
     {
         return PatchableJump(branchPtrWithPatch(cond, left, dataLabel, initialRightValue));
     }
@@ -486,6 +508,30 @@ public:
         return !(random() & (BlindingModulus - 1));
     }
 
+    void move(Address src, Address dest, RegisterID scratch)
+    {
+        loadPtr(src, scratch);
+        storePtr(scratch, dest);
+    }
+    
+    void move32(Address src, Address dest, RegisterID scratch)
+    {
+        load32(src, scratch);
+        store32(scratch, dest);
+    }
+    
+    void moveFloat(Address src, Address dest, FPRegisterID scratch)
+    {
+        loadFloat(src, scratch);
+        storeFloat(scratch, dest);
+    }
+    
+    void moveDouble(Address src, Address dest, FPRegisterID scratch)
+    {
+        loadDouble(src, scratch);
+        storeDouble(scratch, dest);
+    }
+
     // Ptr methods
     // On 32-bit platforms (i.e. x86), these methods directly map onto their 32-bit equivalents.
     // FIXME: should this use a test for 32-bitness instead of this specific exception?
@@ -550,9 +596,19 @@ public:
         lshift32(trustedImm32ForShift(imm), srcDest);
     }
     
+    void lshiftPtr(TrustedImm32 imm, RegisterID srcDest)
+    {
+        lshift32(imm, srcDest);
+    }
+    
     void rshiftPtr(Imm32 imm, RegisterID srcDest)
     {
         rshift32(trustedImm32ForShift(imm), srcDest);
+    }
+
+    void rshiftPtr(TrustedImm32 imm, RegisterID srcDest)
+    {
+        rshift32(imm, srcDest);
     }
 
     void urshiftPtr(Imm32 imm, RegisterID srcDest)
@@ -560,9 +616,19 @@ public:
         urshift32(trustedImm32ForShift(imm), srcDest);
     }
 
+    void urshiftPtr(RegisterID shiftAmmount, RegisterID srcDest)
+    {
+        urshift32(shiftAmmount, srcDest);
+    }
+
     void negPtr(RegisterID dest)
     {
         neg32(dest);
+    }
+
+    void negPtr(RegisterID src, RegisterID dest)
+    {
+        neg32(src, dest);
     }
 
     void orPtr(RegisterID src, RegisterID dest)
@@ -610,6 +676,15 @@ public:
         xor32(imm, srcDest);
     }
 
+    void xorPtr(TrustedImmPtr imm, RegisterID srcDest)
+    {
+        xor32(TrustedImm32(imm), srcDest);
+    }
+
+    void xorPtr(Address src, RegisterID dest)
+    {
+        xor32(src, dest);
+    }
 
     void loadPtr(ImplicitAddress address, RegisterID dest)
     {
@@ -626,6 +701,18 @@ public:
         load32(address, dest);
     }
 
+#if ENABLE(FAST_TLS_JIT)
+    void loadFromTLSPtr(uint32_t offset, RegisterID dst)
+    {
+        loadFromTLS32(offset, dst);
+    }
+
+    void storeToTLSPtr(RegisterID src, uint32_t offset)
+    {
+        storeToTLS32(src, offset);
+    }
+#endif
+
     DataLabel32 loadPtrWithAddressOffsetPatch(Address address, RegisterID dest)
     {
         return load32WithAddressOffsetPatch(address, dest);
@@ -640,7 +727,7 @@ public:
     {
         move(Imm32(imm.asTrustedImmPtr()), dest);
     }
-
+    
     void comparePtr(RelationalCondition cond, RegisterID left, TrustedImm32 right, RegisterID dest)
     {
         compare32(cond, left, right, dest);
@@ -776,7 +863,7 @@ public:
         return MacroAssemblerBase::branchTest8(cond, Address(address.base, address.offset), mask);
     }
 
-#else // !CPU(X86_64)
+#else // !CPU(X86_64) && !CPU(ARM64)
 
     void addPtr(RegisterID src, RegisterID dest)
     {
@@ -843,9 +930,19 @@ public:
         lshift64(trustedImm32ForShift(imm), srcDest);
     }
 
+    void lshiftPtr(TrustedImm32 imm, RegisterID srcDest)
+    {
+        lshift64(imm, srcDest);
+    }
+
     void rshiftPtr(Imm32 imm, RegisterID srcDest)
     {
         rshift64(trustedImm32ForShift(imm), srcDest);
+    }
+
+    void rshiftPtr(TrustedImm32 imm, RegisterID srcDest)
+    {
+        rshift64(imm, srcDest);
     }
 
     void urshiftPtr(Imm32 imm, RegisterID srcDest)
@@ -853,9 +950,19 @@ public:
         urshift64(trustedImm32ForShift(imm), srcDest);
     }
 
+    void urshiftPtr(RegisterID shiftAmmount, RegisterID srcDest)
+    {
+        urshift64(shiftAmmount, srcDest);
+    }
+
     void negPtr(RegisterID dest)
     {
         neg64(dest);
+    }
+
+    void negPtr(RegisterID src, RegisterID dest)
+    {
+        neg64(src, dest);
     }
 
     void orPtr(RegisterID src, RegisterID dest)
@@ -908,6 +1015,11 @@ public:
         xor64(src, dest);
     }
     
+    void xorPtr(Address src, RegisterID dest)
+    {
+        xor64(src, dest);
+    }
+    
     void xorPtr(RegisterID src, Address dest)
     {
         xor64(src, dest);
@@ -916,6 +1028,12 @@ public:
     void xorPtr(TrustedImm32 imm, RegisterID srcDest)
     {
         xor64(imm, srcDest);
+    }
+
+    // FIXME: Look into making the need for a scratch register explicit, or providing the option to specify a scratch register.
+    void xorPtr(TrustedImmPtr imm, RegisterID srcDest)
+    {
+        xor64(TrustedImm64(imm), srcDest);
     }
 
     void loadPtr(ImplicitAddress address, RegisterID dest)
@@ -932,6 +1050,17 @@ public:
     {
         load64(address, dest);
     }
+
+#if ENABLE(FAST_TLS_JIT)
+    void loadFromTLSPtr(uint32_t offset, RegisterID dst)
+    {
+        loadFromTLS64(offset, dst);
+    }
+    void storeToTLSPtr(RegisterID src, uint32_t offset)
+    {
+        storeToTLS64(src, offset);
+    }
+#endif
 
     DataLabel32 loadPtrWithAddressOffsetPatch(Address address, RegisterID dest)
     {
@@ -1271,6 +1400,14 @@ public:
         else
             move(imm.asTrustedImm64(), dest);
     }
+
+#if CPU(X86_64) || CPU(ARM64)
+    void moveDouble(Imm64 imm, FPRegisterID dest)
+    {
+        move(imm, scratchRegister());
+        move64ToDouble(scratchRegister(), dest);
+    }
+#endif
 
     void and64(Imm32 imm, RegisterID dest)
     {
@@ -1761,16 +1898,70 @@ public:
         urshift32(src, trustedImm32ForShift(amount), dest);
     }
 
+    // If the result jump is taken that means the assert passed.
+    void jitAssert(const WTF::ScopedLambda<Jump(void)>&);
+
 #if ENABLE(MASM_PROBE)
-    using MacroAssemblerBase::probe;
+    // This function emits code to preserve the CPUState (e.g. registers),
+    // call a user supplied probe function, and restore the CPUState before
+    // continuing with other JIT generated code.
+    //
+    // The user supplied probe function will be called with a single pointer to
+    // a Probe::State struct (defined below) which contains, among other things,
+    // the preserved CPUState. This allows the user probe function to inspect
+    // the CPUState at that point in the JIT generated code.
+    //
+    // If the user probe function alters the register values in the Probe::State,
+    // the altered values will be loaded into the CPU registers when the probe
+    // returns.
+    //
+    // The Probe::State is stack allocated and is only valid for the duration
+    // of the call to the user probe function.
+    //
+    // The probe function may choose to move the stack pointer (in any direction).
+    // To do this, the probe function needs to set the new sp value in the CPUState.
+    //
+    // The probe function may also choose to fill stack space with some values.
+    // To do this, the probe function must first:
+    // 1. Set the new sp value in the Probe::State's CPUState.
+    // 2. Set the Probe::State's initializeStackFunction to a Probe::Function callback
+    //    which will do the work of filling in the stack values after the probe
+    //    trampoline has adjusted the machine stack pointer.
+    // 3. Set the Probe::State's initializeStackArgs to any value that the client wants
+    //    to pass to the initializeStackFunction callback.
+    // 4. Return from the probe function.
+    //
+    // Upon returning from the probe function, the probe trampoline will adjust the
+    // the stack pointer based on the sp value in CPUState. If initializeStackFunction
+    // is not set, the probe trampoline will restore registers and return to its caller.
+    //
+    // If initializeStackFunction is set, the trampoline will move the Probe::State
+    // beyond the range of the stack pointer i.e. it will place the new Probe::State at
+    // an address lower than where CPUState.sp() points. This ensures that the
+    // Probe::State will not be trashed by the initializeStackFunction when it writes to
+    // the stack. Then, the trampoline will call back to the initializeStackFunction
+    // Probe::Function to let it fill in the stack values as desired. The
+    // initializeStackFunction Probe::Function will be passed the moved Probe::State at
+    // the new location.
+    //
+    // initializeStackFunction may now write to the stack at addresses greater or
+    // equal to CPUState.sp(), but not below that. initializeStackFunction is also
+    // not allowed to change CPUState.sp(). If the initializeStackFunction does not
+    // abide by these rules, then behavior is undefined, and bad things may happen.
+    //
+    // Note: this version of probe() should be implemented by the target specific
+    // MacroAssembler.
+    void probe(Probe::Function, void* arg);
+
+    JS_EXPORT_PRIVATE void probe(std::function<void(Probe::Context&)>);
 
     // Let's you print from your JIT generated code.
     // See comments in MacroAssemblerPrinter.h for examples of how to use this.
     template<typename... Arguments>
-    void print(Arguments... args);
+    void print(Arguments&&... args);
 
-    void probe(std::function<void (ProbeContext*)>);
-#endif
+    void print(Printer::PrintRecordList*);
+#endif // ENABLE(MASM_PROBE)
 };
 
 } // namespace JSC

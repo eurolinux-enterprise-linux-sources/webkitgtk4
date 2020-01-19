@@ -1,6 +1,6 @@
 /*
  *  Copyright (C) 1999-2000 Harri Porten (porten@kde.org)
- *  Copyright (C) 2002, 2005-2009, 2013-2014, 2016 Apple Inc. All rights reserved.
+ *  Copyright (C) 2002-2017 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -34,7 +34,7 @@ JSValue jsTypeStringForValue(CallFrame*, JSValue);
 JSValue jsTypeStringForValue(VM&, JSGlobalObject*, JSValue);
 bool jsIsObjectTypeOrNull(CallFrame*, JSValue);
 bool jsIsFunctionType(JSValue);
-size_t normalizePrototypeChain(CallFrame*, Structure*);
+size_t normalizePrototypeChain(CallFrame*, JSCell*, bool& sawPolyProto);
 
 ALWAYS_INLINE JSString* jsString(ExecState* exec, JSString* s1, JSString* s2)
 {
@@ -122,7 +122,7 @@ ALWAYS_INLINE JSValue jsStringFromRegisterArray(ExecState* exec, Register* strin
 {
     VM* vm = &exec->vm();
     auto scope = DECLARE_THROW_SCOPE(*vm);
-    JSRopeString::RopeBuilder ropeBuilder(*vm);
+    JSRopeString::RopeBuilder<RecordOverflow> ropeBuilder(*vm);
 
     for (unsigned i = 0; i < count; ++i) {
         JSValue v = strings[-static_cast<int>(i)].jsValue();
@@ -139,7 +139,7 @@ ALWAYS_INLINE JSValue jsStringFromArguments(ExecState* exec, JSValue thisValue)
 {
     VM* vm = &exec->vm();
     auto scope = DECLARE_THROW_SCOPE(*vm);
-    JSRopeString::RopeBuilder ropeBuilder(*vm);
+    JSRopeString::RopeBuilder<RecordOverflow> ropeBuilder(*vm);
     JSString* str = thisValue.toString(exec);
     RETURN_IF_EXCEPTION(scope, { });
     ropeBuilder.append(str);
@@ -261,12 +261,18 @@ inline bool scribbleFreeCells()
     return !ASSERT_DISABLED || Options::scribbleFreeCells();
 }
 
+#define SCRIBBLE_WORD static_cast<intptr_t>(0xbadbeef0)
+
+inline bool isScribbledValue(JSValue value)
+{
+    return JSValue::encode(value) == JSValue::encode(bitwise_cast<JSCell*>(SCRIBBLE_WORD));
+}
+
 inline void scribble(void* base, size_t size)
 {
     for (size_t i = size / sizeof(EncodedJSValue); i--;) {
         // Use a 16-byte aligned value to ensure that it passes the cell check.
-        static_cast<EncodedJSValue*>(base)[i] = JSValue::encode(
-            bitwise_cast<JSCell*>(static_cast<intptr_t>(0xbadbeef0)));
+        static_cast<EncodedJSValue*>(base)[i] = JSValue::encode(bitwise_cast<JSCell*>(SCRIBBLE_WORD));
     }
 }
 

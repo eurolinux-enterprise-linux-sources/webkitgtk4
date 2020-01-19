@@ -26,6 +26,8 @@
 #pragma once
 
 #include "AbstractModuleRecord.h"
+#include "SourceCode.h"
+#include "VariableEnvironment.h"
 
 namespace JSC {
 
@@ -43,14 +45,12 @@ public:
     static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
     static JSModuleRecord* create(ExecState*, VM&, Structure*, const Identifier&, const SourceCode&, const VariableEnvironment&, const VariableEnvironment&);
 
-    void link(ExecState*);
+    void link(ExecState*, JSValue key, JSValue scriptFetcher);
     JS_EXPORT_PRIVATE JSValue evaluate(ExecState*);
 
     const SourceCode& sourceCode() const { return m_sourceCode; }
     const VariableEnvironment& declaredVariables() const { return m_declaredVariables; }
     const VariableEnvironment& lexicalVariables() const { return m_lexicalVariables; }
-
-    ModuleProgramExecutable* moduleProgramExecutable() const { return m_moduleProgramExecutable.get(); }
 
 private:
     JSModuleRecord(VM&, Structure*, const Identifier&, const SourceCode&, const VariableEnvironment&, const VariableEnvironment&);
@@ -60,7 +60,7 @@ private:
     static void visitChildren(JSCell*, SlotVisitor&);
     static void destroy(JSCell*);
 
-    void instantiateDeclarations(ExecState*, ModuleProgramExecutable*);
+    void instantiateDeclarations(ExecState*, ModuleProgramExecutable*, JSValue key, JSValue scriptFetcher);
 
     SourceCode m_sourceCode;
     VariableEnvironment m_declaredVariables;

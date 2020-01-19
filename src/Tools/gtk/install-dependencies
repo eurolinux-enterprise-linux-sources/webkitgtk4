@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # This script needs to be run with root rights.
 if [ $UID -ne 0 ]; then
@@ -37,7 +37,7 @@ function checkInstaller {
         exit 0
     fi
 
-    if [ `uname` -eq "Darwin" ]; then
+    if [ `uname` = "Darwin" ]; then
        installDependenciesWithBrew
        exit 0
     fi
@@ -65,6 +65,7 @@ function installDependenciesWithBrew {
          libcroco \
          libgcrypt \
          libgpg-error \
+         libtasn1 \
          libtiff \
          libtool \
          ninja \
@@ -106,18 +107,21 @@ function installDependenciesWithApt {
         libedit-dev \
         libenchant-dev \
         libfaad-dev \
+        libffi-dev \
+        libfile-copy-recursive-perl \
         $(aptIfElse libgcrypt20-dev libgcrypt11-dev) \
-        $(aptIfElse libgeoclue-2-dev libgeoclue-dev) \
         libgirepository1.0-dev \
         libgl1-mesa-dev \
         libgl1-mesa-glx \
         libgtk2.0-dev \
         libgtk-3-dev \
         libgstreamer1.0-dev \
+        libgstreamer-plugins-bad1.0-dev \
         libgstreamer-plugins-base1.0-dev \
         libgudev-1.0-dev \
         libhyphen-dev \
         libjpeg-dev \
+        libmount-dev \
         libmpg123-dev \
         libnotify-dev \
         libopus-dev \
@@ -128,9 +132,13 @@ function installDependenciesWithApt {
         libsecret-1-dev \
         libsoup2.4-dev \
         libsqlite3-dev \
+        libsrtp0-dev \
+        libtasn1-6-dev \
         libtheora-dev \
         libtool \
         libvorbis-dev \
+        libvpx-dev \
+        libupower-glib-dev \
         libwebp-dev \
         libxcomposite-dev \
         libxt-dev \
@@ -149,7 +157,8 @@ function installDependenciesWithApt {
         dbus-x11 \
         gdb \
         libapache2-mod-bw \
-        $(aptIfElse libapache2-mod-php7.0 libapache2-mod-php5) \
+        libapache2-mod-php \
+        libcgi-pm-perl \
         libgpg-error-dev \
         psmisc \
         pulseaudio-utils \
@@ -168,6 +177,7 @@ function installDependenciesWithApt {
         gsettings-desktop-schemas-dev \
         icon-naming-utils \
         libcroco3-dev \
+        libcups2-dev \
         libdrm-dev \
         libegl1-mesa-dev \
         libepoxy-dev \
@@ -180,18 +190,23 @@ function installDependenciesWithApt {
         libjson-glib-dev \
         libinput-dev \
         libmtdev-dev \
+        liborc-0.4-dev \
         libp11-kit-dev \
         libpciaccess-dev \
         libproxy-dev \
         libssl-dev \
         libtiff5-dev \
+        libva-dev \
         libv4l-dev \
         libxcb-composite0-dev \
         libxcb-xfixes0-dev \
-        $(aptIfElse libxfont1-dev libxfont-dev) \
+        libxfont-dev \
+        libxfont2 \
         libxkbfile-dev \
+        libxkbcommon-x11-dev \
         libtool-bin \
         libudev-dev \
+        libxml-libxml-perl \
         python-dev \
         ragel \
         x11proto-bigreqs-dev \
@@ -225,6 +240,7 @@ function installDependenciesWithPacman {
         bison \
         cmake \
         libedit \
+        libffi \
         file \
         findutils \
         flex \
@@ -236,6 +252,7 @@ function installDependenciesWithPacman {
         grep \
         groff \
         gstreamer \
+        gst-plugins-bad \
         gst-plugins-base-libs \
         gzip \
         hyphen \
@@ -254,7 +271,7 @@ function installDependenciesWithPacman {
         atk \
         enchant \
         faad2 \
-        geoclue \
+        geoclue2 \
         gobject-introspection \
         mesa \
         mesa-libgl \
@@ -265,6 +282,7 @@ function installDependenciesWithPacman {
         mpg123 \
         opus \
         pango \
+        perl-file-copy-recursive \
         libgcrypt \
         libnotify \
         libpng \
@@ -272,23 +290,27 @@ function installDependenciesWithPacman {
         librsvg \
         libsecret \
         libsoup \
+        libsrtp \
         sqlite \
+        libtasn1 \
         libtheora \
         libtool \
         libvorbis \
+        libvpx \
         libwebp \
         libxcomposite \
         libxt \
         libxslt \
         libxtst \
+        upower \
         ninja \
         ruby \
+        util-linux \
         xorg-font-utils \
         wayland"
 
     # These are dependencies necessary for running tests.
-    # Note: apache-mod_bw is available in the AUR, but the main repos
-    #       could not find ruby-json
+    # Note: apache-mod_bw, ruby-json, and ruby-highline are available in the AUR
     packages="$packages \
         apache \
         curl \
@@ -302,7 +324,6 @@ function installDependenciesWithPacman {
         python-gobject \
         python2-psutil \
         ruby \
-        ruby-highline \
         weston \
         xorg-server-xvfb"
 
@@ -316,6 +337,7 @@ function installDependenciesWithPacman {
         gsettings-desktop-schemas \
         icon-naming-utils \
         libcroco \
+        libcups \
         libdrm \
         libepoxy \
         libevdev \
@@ -325,11 +347,15 @@ function installDependenciesWithPacman {
         libpciaccess \
         libproxy \
         libtiff \
+        libva \
         libxfixes \
         libxfont \
         libxcb \
         libxkbfile \
+        libxkbcommon-x11 \
         mtdev \
+        orc \
+        perl-xml-libxml\
         python2 \
         python2-lxml \
         ragel \
@@ -346,7 +372,6 @@ function installDependenciesWithPacman {
         xorg-font-utils \
         xorg-util-macros \
         xtrans \
-        xorg-utils \
         yasm"
 
     # These are dependencies necessary for using webkit-patch
@@ -354,9 +379,26 @@ function installDependenciesWithPacman {
         svn"
     pacman -S --needed $packages
 
-    echo "You will also need to follow the instructions on the Arch Wiki to make"
-    echo "'python' call python2 in the webkit folder"
-    echo "https://wiki.archlinux.org/index.php/Python#Dealing_with_version_problem_in_build_scripts"
+	cat <<-EOF
+
+The following packages are available from AUR, and needed for running tests:
+
+    apache-mod_bw ruby-json ruby-highline
+
+Instructions on how to use the AUR can be found on the Arch Wiki:
+
+    https://wiki.archlinux.org/index.php/Arch_User_Repository
+
+You will also need to follow the instructions on the wiki to make 'python'
+call python2 in the WebKit folder:
+
+    https://wiki.archlinux.org/index.php/Python#Dealing_with_version_problem_in_build_scripts
+
+Alternatively, you may use a Python 2.x virtualenv while hacking on WebKitGTK+:
+
+    https://wiki.archlinux.org/index.php/Python/Virtual_environment
+
+EOF
 }
 
 function installDependenciesWithDnf {
@@ -376,6 +418,7 @@ function installDependenciesWithDnf {
         gobject-introspection-devel \
         gperf \
         gstreamer1-devel \
+        gstreamer1-plugins-bad-free-devel \
         gstreamer1-plugins-base-devel \
         gtk-doc \
         gtk2-devel \
@@ -387,29 +430,41 @@ function installDependenciesWithDnf {
         libXtst-devel \
         libxslt-devel \
         libedit-devel \
+        libffi-devel \
         libgcrypt-devel \
         libgudev1-devel \
         libjpeg-turbo-devel \
+        libmount-devel \
         libnotify-devel \
         libpng-devel \
         libsecret-devel \
         libsoup-devel \
+        libsrtp-devel \
+        libtasn1-devel \
+        libtheora-devel \
         libv4l-devel \
+        libvorbis-devel \
+        libvpx-devel \
         libwebp-devel \
         libwayland-client-devel \
         libwayland-server-devel \
         mesa-libGL-devel \
         ninja-build \
         openssl-devel \
+        opus-devel \
         patch \
         pcre-devel \
+        perl-File-Copy-Recursive \
+        perl-JSON-PP \
         perl-Switch \
+        perl-Time-HiRes \
         perl-version \
         pulseaudio-libs-devel \
         python-devel \
         redhat-rpm-config \
         ruby \
-        sqlite-devel"
+        sqlite-devel \
+        upower-devel"
 
     # These are dependencies necessary for running tests.
     packages="$packages \
@@ -435,16 +490,16 @@ function installDependenciesWithDnf {
 
     # These are dependencies necessary for building the jhbuild.
     packages="$packages \
-        expat-devel \
+        cups-devel \
         docbook-utils \
-        docbook-utils-pdf \
+        expat-devel \
         git \
-        gobject-introspection \
         gnutls-devel \
+        gobject-introspection \
         gsettings-desktop-schemas-devel \
         icon-naming-utils \
         itstool \
-        libXfont-devel \
+        libXfont2-devel \
         libcroco-devel \
         libdrm-devel \
         libepoxy-devel \
@@ -455,10 +510,14 @@ function installDependenciesWithDnf {
         libpciaccess-devel \
         libproxy-devel \
         libtiff-devel \
+        libva-devel \
         libxcb-devel \
         libxkbfile-devel \
+        libxkbcommon-x11-devel \
         mesa-libEGL-devel \
         mtdev-devel \
+        orc-devel \
+        perl-XML-LibXML \
         ragel \
         systemd-devel \
         xorg-x11-font-utils \

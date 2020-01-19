@@ -28,21 +28,25 @@
 #define CoordinatedImageBacking_h
 
 #if USE(COORDINATED_GRAPHICS)
+
 #include "CoordinatedGraphicsState.h"
-#include "CoordinatedSurface.h"
 #include "Image.h"
 #include "Timer.h"
 #include <wtf/RefCounted.h>
 #include <wtf/Vector.h>
 
+namespace Nicosia {
+class Buffer;
+}
+
 namespace WebCore {
 
-class CoordinatedImageBacking : public RefCounted<CoordinatedImageBacking> {
+class WEBCORE_EXPORT CoordinatedImageBacking : public RefCounted<CoordinatedImageBacking> {
 public:
     class Client {
     public:
         virtual void createImageBacking(CoordinatedImageBackingID) = 0;
-        virtual void updateImageBacking(CoordinatedImageBackingID, RefPtr<CoordinatedSurface>&&) = 0;
+        virtual void updateImageBacking(CoordinatedImageBackingID, RefPtr<Nicosia::Buffer>&&) = 0;
         virtual void clearImageBackingContents(CoordinatedImageBackingID) = 0;
         virtual void removeImageBacking(CoordinatedImageBackingID) = 0;
     };
@@ -52,7 +56,7 @@ public:
         virtual bool imageBackingVisible() = 0;
     };
 
-    static PassRefPtr<CoordinatedImageBacking> create(Client*, PassRefPtr<Image>);
+    static Ref<CoordinatedImageBacking> create(Client&, Ref<Image>&&);
     virtual ~CoordinatedImageBacking();
 
     static CoordinatedImageBackingID getCoordinatedImageBackingID(Image*);
@@ -68,7 +72,7 @@ public:
     void update();
 
 private:
-    CoordinatedImageBacking(Client*, PassRefPtr<Image>);
+    CoordinatedImageBacking(Client&, Ref<Image>&&);
 
     void releaseSurfaceIfNeeded();
     void updateVisibilityIfNeeded(bool& changedToVisible);
@@ -80,7 +84,7 @@ private:
     CoordinatedImageBackingID m_id;
     Vector<Host*> m_hosts;
 
-    RefPtr<CoordinatedSurface> m_surface;
+    RefPtr<Nicosia::Buffer> m_buffer;
 
     Timer m_clearContentsTimer;
 

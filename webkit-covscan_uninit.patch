@@ -1,0 +1,21 @@
+diff -up webkitgtk-2.20.3/Source/JavaScriptCore/runtime/CodeCache.cpp.covscan_uninit webkitgtk-2.20.3/Source/JavaScriptCore/runtime/CodeCache.cpp
+--- webkitgtk-2.20.3/Source/JavaScriptCore/runtime/CodeCache.cpp.covscan_uninit	2018-06-18 10:03:23.060605715 +0200
++++ webkitgtk-2.20.3/Source/JavaScriptCore/runtime/CodeCache.cpp	2018-06-18 10:03:44.223529644 +0200
+@@ -129,7 +129,7 @@ UnlinkedFunctionExecutable* CodeCache::g
+     // This function assumes an input string that would result in a single function declaration.
+     StatementNode* statement = program->singleStatement();
+     if (UNLIKELY(!statement)) {
+-        JSToken token;
++        JSToken token = { };
+         error = ParserError(ParserError::SyntaxError, ParserError::SyntaxErrorIrrecoverable, token, "Parser error", -1);
+         return nullptr;
+     }
+@@ -137,7 +137,7 @@ UnlinkedFunctionExecutable* CodeCache::g
+ 
+     StatementNode* funcDecl = static_cast<BlockNode*>(statement)->singleStatement();
+     if (UNLIKELY(!funcDecl)) {
+-        JSToken token;
++        JSToken token = { };
+         error = ParserError(ParserError::SyntaxError, ParserError::SyntaxErrorIrrecoverable, token, "Parser error", -1);
+         return nullptr;
+     }

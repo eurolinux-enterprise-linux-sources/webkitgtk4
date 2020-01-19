@@ -25,7 +25,6 @@
 
 #pragma once
 
-#include "ParserModes.h"
 #include <limits.h>
 #include <stdint.h>
 
@@ -94,10 +93,9 @@ enum JSTokenType {
     LET,
     YIELD,
     AWAIT,
-    ASYNC,
 
     FirstContextualKeywordToken = LET,
-    LastContextualKeywordToken = ASYNC,
+    LastContextualKeywordToken = AWAIT,
     FirstSafeContextualKeywordToken = AWAIT,
     LastSafeContextualKeywordToken = LastContextualKeywordToken,
 
@@ -112,6 +110,7 @@ enum JSTokenType {
     BACKQUOTE,
     INTEGER,
     DOUBLE,
+    BIGINT,
     IDENT,
     STRING,
     TEMPLATE,
@@ -188,6 +187,7 @@ enum JSTokenType {
     UNTERMINATED_TEMPLATE_LITERAL_ERRORTOK = 13 | ErrorTokenFlag | UnterminatedErrorTokenFlag,
     UNTERMINATED_REGEXP_LITERAL_ERRORTOK = 14 | ErrorTokenFlag | UnterminatedErrorTokenFlag,
     INVALID_TEMPLATE_LITERAL_ERRORTOK = 15 | ErrorTokenFlag,
+    UNEXPECTED_ESCAPE_ERRORTOK = 16 | ErrorTokenFlag,
 };
 
 struct JSTextPosition {
@@ -214,7 +214,14 @@ union JSTokenData {
         uint32_t lineStartOffset;
     };
     double doubleValue;
-    const Identifier* ident;
+    struct {
+        const Identifier* ident;
+        bool escaped;
+    };
+    struct {
+        const Identifier* bigIntString;
+        uint8_t radix;
+    };
     struct {
         const Identifier* cooked;
         const Identifier* raw;

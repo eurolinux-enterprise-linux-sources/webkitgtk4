@@ -28,15 +28,11 @@
 #include "InspectorCSSOMWrappers.h"
 #include "MediaQueryEvaluator.h"
 #include "RenderStyle.h"
-#include "RuleFeature.h"
 #include "RuleSet.h"
 #include "SelectorChecker.h"
-#include "StylePendingResources.h"
-#include "StyleScope.h"
 #include <bitset>
 #include <memory>
 #include <wtf/HashMap.h>
-#include <wtf/HashSet.h>
 #include <wtf/RefPtr.h>
 #include <wtf/Vector.h>
 #include <wtf/text/AtomicStringHash.h>
@@ -66,7 +62,6 @@ class KeyframeList;
 class KeyframeValue;
 class MediaQueryEvaluator;
 class Node;
-class RenderRegion;
 class RenderScrollbar;
 class RuleData;
 class RuleSet;
@@ -80,7 +75,6 @@ class StyleProperties;
 class StyleRule;
 class StyleRuleKeyframes;
 class StyleRulePage;
-class StyleRuleRegion;
 class StyleSheet;
 class StyleSheetList;
 class StyledElement;
@@ -135,11 +129,11 @@ public:
     StyleResolver(Document&);
     ~StyleResolver();
 
-    ElementStyle styleForElement(const Element&, const RenderStyle* parentStyle, const RenderStyle* parentBoxStyle = nullptr, RuleMatchingBehavior = MatchAllRules, const RenderRegion* regionForStyling = nullptr, const SelectorFilter* = nullptr);
+    ElementStyle styleForElement(const Element&, const RenderStyle* parentStyle, const RenderStyle* parentBoxStyle = nullptr, RuleMatchingBehavior = MatchAllRules, const SelectorFilter* = nullptr);
 
     void keyframeStylesForAnimation(const Element&, const RenderStyle*, KeyframeList&);
 
-    std::unique_ptr<RenderStyle> pseudoStyleForElement(const Element&, const PseudoStyleRequest&, const RenderStyle& parentStyle);
+    std::unique_ptr<RenderStyle> pseudoStyleForElement(const Element&, const PseudoStyleRequest&, const RenderStyle& parentStyle, const SelectorFilter* = nullptr);
 
     std::unique_ptr<RenderStyle> styleForPage(int pageIndex);
     std::unique_ptr<RenderStyle> defaultStyleForElement();
@@ -159,7 +153,10 @@ public:
 
     const MediaQueryEvaluator& mediaQueryEvaluator() const { return m_mediaQueryEvaluator; }
 
+    RenderStyle* overrideDocumentElementStyle() const { return m_overrideDocumentElementStyle; }
     void setOverrideDocumentElementStyle(RenderStyle* style) { m_overrideDocumentElementStyle = style; }
+
+    void addCurrentSVGFontFaceRules();
 
 private:
     std::unique_ptr<RenderStyle> styleForKeyframe(const RenderStyle*, const StyleRuleKeyframe*, KeyframeValue&);
@@ -170,8 +167,7 @@ public:
         UAAndUserCSSRules   = 1 << 1,
         AuthorCSSRules      = 1 << 2,
         EmptyCSSRules       = 1 << 3,
-        CrossOriginCSSRules = 1 << 4,
-        AllButEmptyCSSRules = UAAndUserCSSRules | AuthorCSSRules | CrossOriginCSSRules,
+        AllButEmptyCSSRules = UAAndUserCSSRules | AuthorCSSRules,
         AllCSSRules         = AllButEmptyCSSRules | EmptyCSSRules,
     };
     Vector<RefPtr<StyleRule>> styleRulesForElement(const Element*, unsigned rulesToInclude = AllButEmptyCSSRules);
@@ -196,7 +192,6 @@ public:
     Color colorFromPrimitiveValue(const CSSPrimitiveValue&, bool forVisitedLink = false) const;
 
     bool hasSelectorForId(const AtomicString&) const;
-    bool hasSelectorForClass(const AtomicString&) const;
     bool hasSelectorForAttribute(const Element&, const AtomicString&) const;
 
 #if ENABLE(CSS_DEVICE_ADAPTATION)
@@ -212,8 +207,6 @@ public:
     bool hasMediaQueriesAffectedByAccessibilitySettingsChange() const;
 
     void addKeyframeStyle(Ref<StyleRuleKeyframes>&&);
-
-    bool checkRegionStyle(const Element* regionElement);
 
     bool usesFirstLineRules() const { return m_ruleSets.features().usesFirstLineRules; }
     bool usesFirstLetterRules() const { return m_ruleSets.features().usesFirstLetterRules; }
@@ -307,7 +300,7 @@ public:
         TextDirection m_direction;
         WritingMode m_writingMode;
     };
-
+    
 private:
     // This function fixes up the default font size if it detects that the current generic font family has changed. -dwh
     void checkForGenericFamilyChange(RenderStyle*, const RenderStyle* parentStyle);
@@ -329,10 +322,6 @@ private:
     void applyCascadedProperties(CascadedProperties&, int firstProperty, int lastProperty, const MatchResult*);
     void cascadeMatches(CascadedProperties&, const MatchResult&, bool important, int startIndex, int endIndex, bool inheritedOnly);
 
-    static bool isValidRegionStyleProperty(CSSPropertyID);
-#if ENABLE(VIDEO_TRACK)
-    static bool isValidCueStyleProperty(CSSPropertyID);
-#endif
     void matchPageRules(MatchResult&, RuleSet*, bool isLeftPage, bool isFirstPage, const String& pageName);
     void matchPageRulesForList(Vector<StyleRulePage*>& matchedRules, const Vector<StyleRulePage*>&, bool isLeftPage, bool isFirstPage, const String& pageName);
 
@@ -352,12 +341,11 @@ public:
     class State {
     public:
         State() { }
-        State(const Element&, const RenderStyle* parentStyle, const RenderStyle* documentElementStyle = nullptr, const RenderRegion* regionForStyling = nullptr, const SelectorFilter* = nullptr);
+        State(const Element&, const RenderStyle* parentStyle, const RenderStyle* documentElementStyle = nullptr, const SelectorFilter* = nullptr);
 
     public:
         void clear();
 
-        Document& document() const { return m_element->document(); }
         const Element* element() const { return m_element; }
 
         void setStyle(std::unique_ptr<RenderStyle>);
@@ -368,7 +356,6 @@ public:
         const RenderStyle* parentStyle() const { return m_parentStyle; }
         const RenderStyle* rootElementStyle() const { return m_rootElementStyle; }
 
-        const RenderRegion* regionForStyling() const { return m_regionForStyling; }
         EInsideLink elementLinkState() const { return m_elementLinkState; }
 
         void setApplyPropertyToRegularStyle(bool isApply) { m_applyPropertyToRegularStyle = isApply; }
@@ -421,8 +408,6 @@ public:
         std::unique_ptr<RenderStyle> m_ownedParentStyle;
         const RenderStyle* m_rootElementStyle { nullptr };
 
-        const RenderRegion* m_regionForStyling { nullptr };
-        
         EInsideLink m_elementLinkState { NotInsideLink };
 
         bool m_applyPropertyToRegularStyle { true };
@@ -535,31 +520,10 @@ inline bool StyleResolver::hasSelectorForAttribute(const Element& element, const
     return m_ruleSets.features().attributeLocalNamesInRules.contains(attributeName);
 }
 
-inline bool StyleResolver::hasSelectorForClass(const AtomicString& classValue) const
-{
-    ASSERT(!classValue.isEmpty());
-    return m_ruleSets.features().classesInRules.contains(classValue);
-}
-
 inline bool StyleResolver::hasSelectorForId(const AtomicString& idValue) const
 {
     ASSERT(!idValue.isEmpty());
     return m_ruleSets.features().idsInRules.contains(idValue);
-}
-
-inline bool checkRegionSelector(const CSSSelector* regionSelector, const Element* regionElement)
-{
-    if (!regionSelector || !regionElement)
-        return false;
-
-    SelectorChecker selectorChecker(regionElement->document());
-    for (const CSSSelector* s = regionSelector; s; s = CSSSelectorList::next(s)) {
-        SelectorChecker::CheckingContext selectorCheckingContext(SelectorChecker::Mode::QueryingRules);
-        unsigned ignoredSpecificity;
-        if (selectorChecker.match(*s, *regionElement, selectorCheckingContext, ignoredSpecificity))
-            return true;
-    }
-    return false;
 }
 
 } // namespace WebCore

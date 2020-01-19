@@ -38,11 +38,10 @@
 #include "DocumentLoader.h"
 #include "EventNames.h"
 #include "FormData.h"
-#include "FormDataList.h"
 #include "Frame.h"
 #include "HTMLParserIdioms.h"
 #include "InspectorInstrumentation.h"
-#include "JSDOMWindowShell.h"
+#include "JSDOMWindowProxy.h"
 #include "JSMainThreadExecState.h"
 #include "ParsingUtilities.h"
 #include "PingLoader.h"
@@ -53,17 +52,17 @@
 #include "SecurityPolicyViolationEvent.h"
 #include "Settings.h"
 #include "TextEncoding.h"
-#include <inspector/InspectorValues.h>
-#include <inspector/ScriptCallStack.h>
-#include <inspector/ScriptCallStackFactory.h>
+#include <JavaScriptCore/ScriptCallStack.h>
+#include <JavaScriptCore/ScriptCallStackFactory.h>
 #include <pal/crypto/CryptoDigest.h>
+#include <wtf/JSONValues.h>
 #include <wtf/SetForScope.h>
 #include <wtf/text/StringBuilder.h>
 #include <wtf/text/TextPosition.h>
 
-using namespace Inspector;
 
 namespace WebCore {
+using namespace Inspector;
 
 static String consoleMessageForViolation(const char* effectiveViolatedDirective, const ContentSecurityPolicyDirective& violatedDirective, const URL& blockedURL, const char* prefix, const char* subject = "it")
 {
@@ -104,9 +103,7 @@ ContentSecurityPolicy::ContentSecurityPolicy(const SecurityOrigin& securityOrigi
     updateSourceSelf(securityOrigin);
 }
 
-ContentSecurityPolicy::~ContentSecurityPolicy()
-{
-}
+ContentSecurityPolicy::~ContentSecurityPolicy() = default;
 
 void ContentSecurityPolicy::copyStateFrom(const ContentSecurityPolicy* other) 
 {
@@ -148,26 +145,30 @@ bool ContentSecurityPolicy::allowRunningOrDisplayingInsecureContent(const URL& u
     return allow;
 }
 
-void ContentSecurityPolicy::didCreateWindowShell(JSDOMWindowShell& windowShell) const
+void ContentSecurityPolicy::didCreateWindowProxy(JSDOMWindowProxy& windowProxy) const
 {
-    JSDOMWindow* window = windowShell.window();
+    auto* window = windowProxy.window();
     ASSERT(window);
     ASSERT(window->scriptExecutionContext());
     ASSERT(window->scriptExecutionContext()->contentSecurityPolicy() == this);
-    if (!windowShell.world().isNormal()) {
+    if (!windowProxy.world().isNormal()) {
         window->setEvalEnabled(true);
         return;
     }
     window->setEvalEnabled(m_lastPolicyEvalDisabledErrorMessage.isNull(), m_lastPolicyEvalDisabledErrorMessage);
+    window->setWebAssemblyEnabled(m_lastPolicyWebAssemblyDisabledErrorMessage.isNull(), m_lastPolicyWebAssemblyDisabledErrorMessage);
 }
 
 ContentSecurityPolicyResponseHeaders ContentSecurityPolicy::responseHeaders() const
 {
-    ContentSecurityPolicyResponseHeaders result;
-    result.m_headers.reserveInitialCapacity(m_policies.size());
-    for (auto& policy : m_policies)
-        result.m_headers.uncheckedAppend({ policy->header(), policy->headerType() });
-    return result;
+    if (!m_cachedResponseHeaders) {
+        ContentSecurityPolicyResponseHeaders result;
+        result.m_headers.reserveInitialCapacity(m_policies.size());
+        for (auto& policy : m_policies)
+            result.m_headers.uncheckedAppend({ policy->header(), policy->headerType() });
+        m_cachedResponseHeaders = WTFMove(result);
+    }
+    return *m_cachedResponseHeaders;
 }
 
 void ContentSecurityPolicy::didReceiveHeaders(const ContentSecurityPolicyResponseHeaders& headers, ReportParsingErrors reportParsingErrors)
@@ -186,6 +187,8 @@ void ContentSecurityPolicy::didReceiveHeader(const String& header, ContentSecuri
         ASSERT(m_policies.isEmpty());
         m_hasAPIPolicy = true;
     }
+
+    m_cachedResponseHeaders = std::nullopt;
 
     // RFC2616, section 4.2 specifies that headers appearing multiple times can
     // be combined with a comma. Walk the header string, and parse each comma
@@ -230,14 +233,18 @@ void ContentSecurityPolicy::applyPolicyToScriptExecutionContext()
     bool enableStrictMixedContentMode = false;
     for (auto& policy : m_policies) {
         const ContentSecurityPolicyDirective* violatedDirective = policy->violatedDirectiveForUnsafeEval();
-        if (violatedDirective && !violatedDirective->directiveList().isReportOnly())
+        if (violatedDirective && !violatedDirective->directiveList().isReportOnly()) {
             m_lastPolicyEvalDisabledErrorMessage = policy->evalDisabledErrorMessage();
+            m_lastPolicyWebAssemblyDisabledErrorMessage = policy->webAssemblyDisabledErrorMessage();
+        }
         if (policy->hasBlockAllMixedContentDirective() && !policy->isReportOnly())
             enableStrictMixedContentMode = true;
     }
 
     if (!m_lastPolicyEvalDisabledErrorMessage.isNull())
         m_scriptExecutionContext->disableEval(m_lastPolicyEvalDisabledErrorMessage);
+    if (!m_lastPolicyWebAssemblyDisabledErrorMessage.isNull())
+        m_scriptExecutionContext->disableWebAssembly(m_lastPolicyWebAssemblyDisabledErrorMessage);
     if (m_sandboxFlags != SandboxNone && is<Document>(m_scriptExecutionContext))
         m_scriptExecutionContext->enforceSandboxFlags(m_sandboxFlags);
     if (enableStrictMixedContentMode)
@@ -311,20 +318,6 @@ bool ContentSecurityPolicy::allPoliciesAllow(ViolatedDirectiveCallback&& callbac
     return isAllowed;
 }
 
-static PAL::CryptoDigest::Algorithm toCryptoDigestAlgorithm(ContentSecurityPolicyHashAlgorithm algorithm)
-{
-    switch (algorithm) {
-    case ContentSecurityPolicyHashAlgorithm::SHA_256:
-        return PAL::CryptoDigest::Algorithm::SHA_256;
-    case ContentSecurityPolicyHashAlgorithm::SHA_384:
-        return PAL::CryptoDigest::Algorithm::SHA_384;
-    case ContentSecurityPolicyHashAlgorithm::SHA_512:
-        return PAL::CryptoDigest::Algorithm::SHA_512;
-    }
-    ASSERT_NOT_REACHED();
-    return PAL::CryptoDigest::Algorithm::SHA_512;
-}
-
 template<typename Predicate>
 ContentSecurityPolicy::HashInEnforcedAndReportOnlyPoliciesPair ContentSecurityPolicy::findHashOfContentInPolicies(Predicate&& predicate, const String& content, OptionSet<ContentSecurityPolicyHashAlgorithm> algorithms) const
 {
@@ -339,13 +332,11 @@ ContentSecurityPolicy::HashInEnforcedAndReportOnlyPoliciesPair ContentSecurityPo
 
     // FIXME: Compute the digest with respect to the raw bytes received from the page.
     // See <https://bugs.webkit.org/show_bug.cgi?id=155184>.
-    CString contentCString = encodingToUse.encode(content, EntitiesForUnencodables);
+    auto encodedContent = encodingToUse.encode(content, UnencodableHandling::Entities);
     bool foundHashInEnforcedPolicies = false;
     bool foundHashInReportOnlyPolicies = false;
     for (auto algorithm : algorithms) {
-        auto cryptoDigest = PAL::CryptoDigest::create(toCryptoDigestAlgorithm(algorithm));
-        cryptoDigest->addBytes(contentCString.data(), contentCString.length());
-        ContentSecurityPolicyHash hash = { algorithm, cryptoDigest->computeHash() };
+        ContentSecurityPolicyHash hash = cryptographicDigestForBytes(algorithm, encodedContent.data(), encodedContent.size());
         if (!foundHashInEnforcedPolicies && allPoliciesWithDispositionAllow(ContentSecurityPolicy::Disposition::Enforce, std::forward<Predicate>(predicate), hash))
             foundHashInEnforcedPolicies = true;
         if (!foundHashInReportOnlyPolicies && allPoliciesWithDispositionAllow(ContentSecurityPolicy::Disposition::ReportOnly, std::forward<Predicate>(predicate), hash))
@@ -558,6 +549,13 @@ bool ContentSecurityPolicy::allowFontFromSource(const URL& url, RedirectResponse
     return allowResourceFromSource(url, redirectResponseReceived, ContentSecurityPolicyDirectiveNames::fontSrc, &ContentSecurityPolicyDirectiveList::violatedDirectiveForFont);
 }
 
+#if ENABLE(APPLICATION_MANIFEST)
+bool ContentSecurityPolicy::allowManifestFromSource(const URL& url, RedirectResponseReceived redirectResponseReceived) const
+{
+    return allowResourceFromSource(url, redirectResponseReceived, ContentSecurityPolicyDirectiveNames::manifestSrc, &ContentSecurityPolicyDirectiveList::violatedDirectiveForManifest);
+}
+#endif // ENABLE(APPLICATION_MANIFEST)
+
 bool ContentSecurityPolicy::allowMediaFromSource(const URL& url, RedirectResponseReceived redirectResponseReceived) const
 {
     return allowResourceFromSource(url, redirectResponseReceived, ContentSecurityPolicyDirectiveNames::mediaSrc, &ContentSecurityPolicyDirectiveList::violatedDirectiveForMedia);
@@ -690,7 +688,7 @@ void ContentSecurityPolicy::reportViolation(const String& effectiveViolatedDirec
     // sent explicitly. As for which directive was violated, that's pretty
     // harmless information.
 
-    auto cspReport = InspectorObject::create();
+    auto cspReport = JSON::Object::create();
     cspReport->setString(ASCIILiteral("document-uri"), documentURI);
     cspReport->setString(ASCIILiteral("referrer"), referrer);
     cspReport->setString(ASCIILiteral("violated-directive"), violatedDirectiveText);
@@ -704,7 +702,7 @@ void ContentSecurityPolicy::reportViolation(const String& effectiveViolatedDirec
         cspReport->setInteger(ASCIILiteral("column-number"), columnNumber);
     }
 
-    auto reportObject = InspectorObject::create();
+    auto reportObject = JSON::Object::create();
     reportObject->setObject(ASCIILiteral("csp-report"), WTFMove(cspReport));
 
     auto report = FormData::create(reportObject->toJSONString().utf8());

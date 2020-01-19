@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -46,18 +46,20 @@ class GraphicsContext;
 class MockRealtimeVideoSource : public MockRealtimeMediaSource {
 public:
 
-    static RefPtr<MockRealtimeVideoSource> create(const String&, const MediaConstraints*);
-    static RefPtr<MockRealtimeVideoSource> createMuted(const String& name);
+    static CaptureSourceOrError create(const String& deviceID, const String& name, const MediaConstraints*);
 
-    virtual ~MockRealtimeVideoSource() { }
+    static VideoCaptureFactory& factory();
+
+    virtual ~MockRealtimeVideoSource();
 
 protected:
-    MockRealtimeVideoSource(const String&);
+    MockRealtimeVideoSource(const String& deviceID, const String& name);
     virtual void updateSampleBuffer() { }
 
     ImageBuffer* imageBuffer() const;
 
     double elapsedTime();
+    bool applySize(const IntSize&) override;
 
 private:
     void updateSettings(RealtimeMediaSourceSettings&) override;
@@ -71,24 +73,22 @@ private:
     void drawText(GraphicsContext&);
     void drawBoxes(GraphicsContext&);
 
-    bool applySize(const IntSize&) override;
     bool applyFrameRate(double) override;
     bool applyFacingMode(RealtimeMediaSourceSettings::VideoFacingMode) override { return true; }
     bool applyAspectRatio(double) override { return true; }
 
-    RefPtr<Image> currentFrameImage() override;
-    void paintCurrentFrameInContext(GraphicsContext&, const FloatRect&) override;
+    bool isCaptureSource() const final { return true; }
 
     void generateFrame();
 
+    void delaySamples(float) override;
+
+    bool mockCamera() const { return device() == MockDevice::Camera1 || device() == MockDevice::Camera2; }
+    bool mockScreen() const { return device() == MockDevice::Screen1 || device() == MockDevice::Screen2; }
+
     float m_baseFontSize { 0 };
-    FontCascade m_timeFont;
-
     float m_bipBopFontSize { 0 };
-    FontCascade m_bipBopFont;
-
     float m_statsFontSize { 0 };
-    FontCascade m_statsFont;
 
     mutable std::unique_ptr<ImageBuffer> m_imageBuffer;
 
@@ -97,6 +97,7 @@ private:
 
     double m_startTime { NAN };
     double m_elapsedTime { 0 };
+    double m_delayUntil { 0 };
 
     unsigned m_frameNumber { 0 };
 

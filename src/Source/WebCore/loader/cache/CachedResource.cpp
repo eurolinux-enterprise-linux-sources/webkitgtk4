@@ -37,32 +37,34 @@
 #include "FrameLoaderClient.h"
 #include "HTTPHeaderNames.h"
 #include "InspectorInstrumentation.h"
-#include "URL.h"
 #include "LoaderStrategy.h"
 #include "Logging.h"
 #include "MainFrame.h"
 #include "MemoryCache.h"
 #include "PlatformStrategies.h"
+#include "ProgressTracker.h"
 #include "ResourceHandle.h"
 #include "SchemeRegistry.h"
 #include "SecurityOrigin.h"
 #include "SubresourceLoader.h"
+#include "URL.h"
+#include <wtf/CompletionHandler.h>
 #include <wtf/CurrentTime.h>
 #include <wtf/MathExtras.h>
 #include <wtf/RefCountedLeakCounter.h>
 #include <wtf/StdLibExtras.h>
-#include <wtf/text/CString.h>
 #include <wtf/Vector.h>
+#include <wtf/text/CString.h>
 
 #if USE(QUICK_LOOK)
 #include "QuickLook.h"
 #endif
 
-using namespace WTF;
 
 #define RELEASE_LOG_IF_ALLOWED(fmt, ...) RELEASE_LOG_IF(cachedResourceLoader.isAlwaysOnLoggingAllowed(), Network, "%p - CachedResource::" fmt, this, ##__VA_ARGS__)
 
 namespace WebCore {
+using namespace WTF;
 
 ResourceLoadPriority CachedResource::defaultPriorityForResourceType(Type type)
 {
@@ -78,6 +80,7 @@ ResourceLoadPriority CachedResource::defaultPriorityForResourceType(Type type)
     case CachedResource::MediaResource:
     case CachedResource::FontResource:
     case CachedResource::RawResource:
+    case CachedResource::Icon:
         return ResourceLoadPriority::Medium;
     case CachedResource::ImageResource:
         return ResourceLoadPriority::Low;
@@ -87,6 +90,8 @@ ResourceLoadPriority CachedResource::defaultPriorityForResourceType(Type type)
 #endif
     case CachedResource::SVGDocumentResource:
         return ResourceLoadPriority::Low;
+    case CachedResource::Beacon:
+        return ResourceLoadPriority::VeryLow;
 #if ENABLE(LINK_PREFETCH)
     case CachedResource::LinkPrefetch:
         return ResourceLoadPriority::VeryLow;
@@ -97,33 +102,39 @@ ResourceLoadPriority CachedResource::defaultPriorityForResourceType(Type type)
     case CachedResource::TextTrackResource:
         return ResourceLoadPriority::Low;
 #endif
+#if ENABLE(APPLICATION_MANIFEST)
+    case CachedResource::ApplicationManifest:
+        return ResourceLoadPriority::Low;
+#endif
     }
     ASSERT_NOT_REACHED();
     return ResourceLoadPriority::Low;
 }
 
-static std::chrono::milliseconds deadDecodedDataDeletionIntervalForResourceType(CachedResource::Type type)
+static Seconds deadDecodedDataDeletionIntervalForResourceType(CachedResource::Type type)
 {
     if (type == CachedResource::Script)
-        return std::chrono::milliseconds { 0 };
+        return 0_s;
 
     return MemoryCache::singleton().deadDecodedDataDeletionInterval();
 }
 
 DEFINE_DEBUG_ONLY_GLOBAL(RefCountedLeakCounter, cachedResourceLeakCounter, ("CachedResource"));
 
-CachedResource::CachedResource(CachedResourceRequest&& request, Type type, SessionID sessionID)
+CachedResource::CachedResource(CachedResourceRequest&& request, Type type, PAL::SessionID sessionID)
     : m_resourceRequest(request.releaseResourceRequest())
     , m_options(request.options())
     , m_decodedDataDeletionTimer(*this, &CachedResource::destroyDecodedData, deadDecodedDataDeletionIntervalForResourceType(type))
     , m_sessionID(sessionID)
     , m_loadPriority(defaultPriorityForResourceType(type))
-    , m_responseTimestamp(std::chrono::system_clock::now())
+    , m_responseTimestamp(WallTime::now())
     , m_fragmentIdentifierForRequest(request.releaseFragmentIdentifier())
     , m_origin(request.releaseOrigin())
     , m_initiatorName(request.initiatorName())
     , m_isLinkPreload(request.isLinkPreload())
+    , m_hasUnknownEncoding(request.isLinkPreload())
     , m_type(type)
+    , m_ignoreForRequestCount(request.ignoreForRequestCount())
 {
     ASSERT(sessionID.isValid());
 
@@ -140,11 +151,11 @@ CachedResource::CachedResource(CachedResourceRequest&& request, Type type, Sessi
 }
 
 // FIXME: For this constructor, we should probably mandate that the URL has no fragment identifier.
-CachedResource::CachedResource(const URL& url, Type type, SessionID sessionID)
+CachedResource::CachedResource(const URL& url, Type type, PAL::SessionID sessionID)
     : m_resourceRequest(url)
     , m_decodedDataDeletionTimer(*this, &CachedResource::destroyDecodedData, deadDecodedDataDeletionIntervalForResourceType(type))
     , m_sessionID(sessionID)
-    , m_responseTimestamp(std::chrono::system_clock::now())
+    , m_responseTimestamp(WallTime::now())
     , m_fragmentIdentifierForRequest(CachedResourceRequest::splitFragmentIdentifierFromRequestURL(m_resourceRequest))
     , m_type(type)
     , m_status(Cached)
@@ -223,8 +234,8 @@ void CachedResource::load(CachedResourceLoader& cachedResourceLoader)
         const String& lastModified = resourceToRevalidate->response().httpHeaderField(HTTPHeaderName::LastModified);
         const String& eTag = resourceToRevalidate->response().httpHeaderField(HTTPHeaderName::ETag);
         if (!lastModified.isEmpty() || !eTag.isEmpty()) {
-            ASSERT(cachedResourceLoader.cachePolicy(type()) != CachePolicyReload);
-            if (cachedResourceLoader.cachePolicy(type()) == CachePolicyRevalidate)
+            ASSERT(cachedResourceLoader.cachePolicy(type(), url()) != CachePolicyReload);
+            if (cachedResourceLoader.cachePolicy(type(), url()) == CachePolicyRevalidate)
                 m_resourceRequest.setHTTPHeaderField(HTTPHeaderName::CacheControl, "max-age=0");
             if (!lastModified.isEmpty())
                 m_resourceRequest.setHTTPHeaderField(HTTPHeaderName::IfModifiedSince, lastModified);
@@ -255,14 +266,47 @@ void CachedResource::load(CachedResourceLoader& cachedResourceLoader)
         m_fragmentIdentifierForRequest = String();
     }
 
-    m_loader = platformStrategies()->loaderStrategy()->loadResource(frame, *this, request, m_options);
-    if (!m_loader) {
-        RELEASE_LOG_IF_ALLOWED("load: Unable to create SubresourceLoader (frame = %p)", &frame);
-        failBeforeStarting();
-        return;
+    if (m_options.keepAlive) {
+        if (!cachedResourceLoader.keepaliveRequestTracker().tryRegisterRequest(*this)) {
+            setResourceError({ errorDomainWebKitInternal, 0, request.url(), ASCIILiteral("Reached maximum amount of queued data of 64Kb for keepalive requests") });
+            failBeforeStarting();
+            return;
+        }
+        // FIXME: We should not special-case Beacon here.
+        if (shouldUsePingLoad(type())) {
+            ASSERT(m_originalRequest);
+            CachedResourceHandle<CachedResource> protectedThis(this);
+
+            // FIXME: Move beacon loads to normal subresource loading to get normal inspector request instrumentation hooks.
+            unsigned long identifier = frame.page()->progress().createUniqueIdentifier();
+            InspectorInstrumentation::willSendRequestOfType(&frame, identifier, frameLoader.activeDocumentLoader(), request, InspectorInstrumentation::LoadType::Beacon);
+
+            platformStrategies()->loaderStrategy()->startPingLoad(frame, request, m_originalRequest->httpHeaderFields(), m_options, [this, protectedThis = WTFMove(protectedThis), protectedFrame = makeRef(frame), identifier] (const ResourceError& error, const ResourceResponse& response) {
+                if (!response.isNull())
+                    InspectorInstrumentation::didReceiveResourceResponse(protectedFrame, identifier, protectedFrame->loader().activeDocumentLoader(), response, nullptr);
+                if (error.isNull()) {
+                    finishLoading(nullptr);
+                    NetworkLoadMetrics emptyMetrics;
+                    InspectorInstrumentation::didFinishLoading(protectedFrame.ptr(), protectedFrame->loader().activeDocumentLoader(), identifier, emptyMetrics, nullptr);
+                } else {
+                    setResourceError(error);
+                    this->error(LoadError);
+                    InspectorInstrumentation::didFailLoading(protectedFrame.ptr(), protectedFrame->loader().activeDocumentLoader(), identifier, error);
+                }
+            });
+            return;
+        }
     }
 
-    m_status = Pending;
+    platformStrategies()->loaderStrategy()->loadResource(frame, *this, WTFMove(request), m_options, [this, protectedThis = CachedResourceHandle<CachedResource>(this), frame = makeRef(frame), loggingAllowed = cachedResourceLoader.isAlwaysOnLoggingAllowed()] (RefPtr<SubresourceLoader>&& loader) {
+        m_loader = WTFMove(loader);
+        if (!m_loader) {
+            RELEASE_LOG_IF(loggingAllowed, Network, "%p - CachedResource::load: Unable to create SubresourceLoader (frame = %p)", this, frame.ptr());
+            failBeforeStarting();
+            return;
+        }
+        m_status = Pending;
+    });
 }
 
 void CachedResource::loadFrom(const CachedResource& resource)
@@ -274,7 +318,7 @@ void CachedResource::loadFrom(const CachedResource& resource)
     if (isCrossOrigin() && m_options.mode == FetchOptions::Mode::Cors) {
         ASSERT(m_origin);
         String errorMessage;
-        if (!WebCore::passesAccessControlCheck(resource.response(), m_options.allowCredentials, *m_origin, errorMessage)) {
+        if (!WebCore::passesAccessControlCheck(resource.response(), m_options.storedCredentialsPolicy, *m_origin, errorMessage)) {
             setResourceError(ResourceError(String(), 0, url(), errorMessage, ResourceError::Type::AccessControl));
             return;
         }
@@ -289,6 +333,7 @@ void CachedResource::setBodyDataFrom(const CachedResource& resource)
 {
     m_data = resource.m_data;
     m_response = resource.m_response;
+    m_response.setTainting(m_responseTainting);
     setDecodedSize(resource.decodedSize());
     setEncodedSize(resource.encodedSize());
 }
@@ -303,12 +348,12 @@ void CachedResource::checkNotify()
         client->notifyFinished(*this);
 }
 
-void CachedResource::addDataBuffer(SharedBuffer&)
+void CachedResource::updateBuffer(SharedBuffer&)
 {
     ASSERT(dataBufferingPolicy() == BufferData);
 }
 
-void CachedResource::addData(const char*, unsigned)
+void CachedResource::updateData(const char*, unsigned)
 {
     ASSERT(dataBufferingPolicy() == DoNotBufferData);
 }
@@ -392,7 +437,7 @@ static inline bool shouldCacheSchemeIndefinitely(StringView scheme)
     return equalLettersIgnoringASCIICase(scheme, "data");
 }
 
-std::chrono::microseconds CachedResource::freshnessLifetime(const ResourceResponse& response) const
+Seconds CachedResource::freshnessLifetime(const ResourceResponse& response) const
 {
     if (!response.url().protocolIsInHTTPFamily()) {
         StringView protocol = response.url().protocol();
@@ -401,37 +446,46 @@ std::chrono::microseconds CachedResource::freshnessLifetime(const ResourceRespon
             // FIXME: We should not cache subresources either, but when we tried this
             // it caused performance and flakiness issues in our test infrastructure.
             if (m_type == MainResource || SchemeRegistry::shouldAlwaysRevalidateURLScheme(protocol.toStringWithoutCopying()))
-                return 0us;
+                return 0_us;
         }
 
-        return std::chrono::microseconds::max();
+        return Seconds::infinity();
     }
 
     return computeFreshnessLifetimeForHTTPFamily(response, m_responseTimestamp);
 }
 
-void CachedResource::redirectReceived(ResourceRequest&, const ResourceResponse& response)
+void CachedResource::redirectReceived(ResourceRequest&& request, const ResourceResponse& response, CompletionHandler<void(ResourceRequest&&)>&& completionHandler)
 {
     m_requestedFromNetworkingLayer = true;
     if (response.isNull())
-        return;
+        return completionHandler(WTFMove(request));
 
     updateRedirectChainStatus(m_redirectChainCacheStatus, response);
+    completionHandler(WTFMove(request));
 }
 
 void CachedResource::setResponse(const ResourceResponse& response)
 {
     ASSERT(m_response.type() == ResourceResponse::Type::Default);
     m_response = response;
-    m_response.setRedirected(m_redirectChainCacheStatus.status != RedirectChainCacheStatus::NoRedirection);
-
     m_varyingHeaderValues = collectVaryingRequestHeaders(m_resourceRequest, m_response, m_sessionID);
+
+#if ENABLE(SERVICE_WORKER)
+    if (m_response.source() == ResourceResponse::Source::ServiceWorker) {
+        m_responseTainting = m_response.tainting();
+        return;
+    }
+#endif
+    m_response.setRedirected(m_redirectChainCacheStatus.status != RedirectChainCacheStatus::NoRedirection);
+    if (m_response.tainting() == ResourceResponse::Tainting::Basic || m_response.tainting() == ResourceResponse::Tainting::Cors)
+        m_response.setTainting(m_responseTainting);
 }
 
 void CachedResource::responseReceived(const ResourceResponse& response)
 {
     setResponse(response);
-    m_responseTimestamp = std::chrono::system_clock::now();
+    m_responseTimestamp = WallTime::now();
     String encoding = response.textEncodingName();
     if (!encoding.isNull())
         setEncoding(encoding);
@@ -464,7 +518,7 @@ void CachedResource::didAddClient(CachedResourceClient& client)
 
 bool CachedResource::addClientToSet(CachedResourceClient& client)
 {
-    if (m_preloadResult == PreloadNotReferenced) {
+    if (m_preloadResult == PreloadNotReferenced && client.shouldMarkAsReferenced()) {
         if (isLoaded())
             m_preloadResult = PreloadReferencedWhileComplete;
         else if (m_requestedFromNetworkingLayer)
@@ -536,7 +590,7 @@ void CachedResource::destroyDecodedDataIfNeeded()
 {
     if (!m_decodedSize)
         return;
-    if (!MemoryCache::singleton().deadDecodedDataDeletionInterval().count())
+    if (!MemoryCache::singleton().deadDecodedDataDeletionInterval())
         return;
     m_decodedDataDeletionTimer.restart();
 }
@@ -709,7 +763,7 @@ void CachedResource::switchClientsToRevalidatedResource()
 
 void CachedResource::updateResponseAfterRevalidation(const ResourceResponse& validatingResponse)
 {
-    m_responseTimestamp = std::chrono::system_clock::now();
+    m_responseTimestamp = WallTime::now();
 
     updateResponseHeadersAfterRevalidation(m_response, validatingResponse);
 }
@@ -820,7 +874,7 @@ inline CachedResource::Callback::Callback(CachedResource& resource, CachedResour
     , m_client(client)
     , m_timer(*this, &Callback::timerFired)
 {
-    m_timer.startOneShot(0);
+    m_timer.startOneShot(0_s);
 }
 
 inline void CachedResource::Callback::cancel()
@@ -850,8 +904,9 @@ void CachedResource::tryReplaceEncodedData(SharedBuffer& newBuffer)
     if (m_data->size() != newBuffer.size() || memcmp(m_data->data(), newBuffer.data(), m_data->size()))
         return;
 
-    if (m_data->tryReplaceContentsWithPlatformBuffer(newBuffer))
-        didReplaceSharedBufferContents();
+    m_data->clear();
+    m_data->append(newBuffer);
+    didReplaceSharedBufferContents();
 }
 
 #endif

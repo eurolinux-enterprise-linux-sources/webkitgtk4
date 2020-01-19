@@ -35,7 +35,7 @@
 #include "Page.h"
 #include "RenderTheme.h"
 #include "ResourceUsageThread.h"
-#include <runtime/VM.h>
+#include <JavaScriptCore/VM.h>
 
 namespace WebCore {
 
@@ -59,11 +59,11 @@ static String formatByteNumber(size_t number)
     return String::format("%lu", number);
 }
 
-static String gcTimerString(double timerFireDate, double now)
+static String gcTimerString(MonotonicTime timerFireDate, MonotonicTime now)
 {
-    if (!timerFireDate)
+    if (std::isnan(timerFireDate))
         return ASCIILiteral("[not scheduled]");
-    return String::format("%g", timerFireDate - now);
+    return String::format("%g", (timerFireDate - now).seconds());
 }
 
 static const float gFontSize = 14;
@@ -74,18 +74,16 @@ public:
         : m_overlay(overlay)
     {
         FontCascadeDescription fontDescription;
-        RenderTheme::defaultTheme()->systemFont(CSSValueMessageBox, fontDescription);
+        RenderTheme::singleton().systemFont(CSSValueMessageBox, fontDescription);
         fontDescription.setComputedSize(gFontSize);
         m_textFont = FontCascade(fontDescription, 0, 0);
         m_textFont.update(nullptr);
     }
 
-    ~ResourceUsageOverlayPainter()
-    {
-    }
+    ~ResourceUsageOverlayPainter() = default;
 
 private:
-    void paintContents(const GraphicsLayer*, GraphicsContext& context, GraphicsLayerPaintingPhase, const FloatRect& clip) override
+    void paintContents(const GraphicsLayer*, GraphicsContext& context, GraphicsLayerPaintingPhase, const FloatRect& clip, GraphicsLayerPaintBehavior) override
     {
         GraphicsContextStateSaver stateSaver(context);
         context.fillRect(clip, Color(0.0f, 0.0f, 0.0f, 0.8f));
@@ -112,7 +110,7 @@ private:
         context.drawText(m_textFont, TextRun(string), position);
         position.move(0, gFontSize + 2);
 
-        double now = WTF::currentTime();
+        MonotonicTime now = MonotonicTime::now();
         string = "Eden GC: " + gcTimerString(gData.timeOfNextEdenCollection, now);
         context.drawText(m_textFont, TextRun(string), position);
         position.move(0, gFontSize + 2);

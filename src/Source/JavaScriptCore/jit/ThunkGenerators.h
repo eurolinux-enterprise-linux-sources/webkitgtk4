@@ -26,12 +26,13 @@
 #pragma once
 
 #include "CodeSpecializationKind.h"
-#include "ThunkGenerator.h"
 
 #if ENABLE(JIT)
 namespace JSC {
 
 class CallLinkInfo;
+class MacroAssemblerCodeRef;
+class VM;
 
 MacroAssemblerCodeRef throwExceptionFromCallSlowPathGenerator(VM*);
 
@@ -45,6 +46,8 @@ MacroAssemblerCodeRef nativeCallGenerator(VM*);
 MacroAssemblerCodeRef nativeConstructGenerator(VM*);
 MacroAssemblerCodeRef nativeTailCallGenerator(VM*);
 MacroAssemblerCodeRef nativeTailCallWithoutSavedTagsGenerator(VM*);
+MacroAssemblerCodeRef internalFunctionCallGenerator(VM*);
+MacroAssemblerCodeRef internalFunctionConstructGenerator(VM*);
 MacroAssemblerCodeRef arityFixupGenerator(VM*);
 MacroAssemblerCodeRef unreachableGenerator(VM*);
 
@@ -64,10 +67,5 @@ MacroAssemblerCodeRef randomThunkGenerator(VM*);
 MacroAssemblerCodeRef truncThunkGenerator(VM*);
 
 MacroAssemblerCodeRef boundThisNoArgsFunctionCallGenerator(VM*);
-
-#if ENABLE(WEBASSEMBLY)
-MacroAssemblerCodeRef throwExceptionFromWasmThunkGenerator(VM*);
-#endif
-
 }
 #endif // ENABLE(JIT)

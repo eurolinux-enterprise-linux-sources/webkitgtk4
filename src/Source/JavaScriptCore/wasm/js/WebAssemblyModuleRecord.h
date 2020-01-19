@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,11 +28,12 @@
 #if ENABLE(WEBASSEMBLY)
 
 #include "AbstractModuleRecord.h"
-#include "WasmFormat.h"
+#include "WasmModuleInformation.h"
 
 namespace JSC {
 
 class JSWebAssemblyInstance;
+class JSWebAssemblyModule;
 class WebAssemblyFunction;
 
 // Based on the WebAssembly.Instance specification
@@ -47,7 +48,7 @@ public:
     static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
     static WebAssemblyModuleRecord* create(ExecState*, VM&, Structure*, const Identifier&, const Wasm::ModuleInformation&);
 
-    void link(ExecState*, JSWebAssemblyInstance*);
+    void link(ExecState*, JSWebAssemblyModule*, JSWebAssemblyInstance*);
     JS_EXPORT_PRIVATE JSValue evaluate(ExecState*);
 
 private:
@@ -58,8 +59,11 @@ private:
 
     static void visitChildren(JSCell*, SlotVisitor&);
 
-    WriteBarrier<JSWebAssemblyInstance> m_instance;
-    WriteBarrier<JSCell> m_startFunction;
+    template<typename T>
+    using PoisonedBarrier = PoisonedWriteBarrier<WebAssemblyModuleRecordPoison, T>;
+
+    PoisonedBarrier<JSWebAssemblyInstance> m_instance;
+    PoisonedBarrier<JSObject> m_startFunction;
 };
 
 } // namespace JSC

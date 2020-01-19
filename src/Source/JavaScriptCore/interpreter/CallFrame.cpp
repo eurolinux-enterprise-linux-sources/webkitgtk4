@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2013-2014, 2016 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008-2017 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,7 +30,10 @@
 #include "InlineCallFrame.h"
 #include "Interpreter.h"
 #include "JSCInlines.h"
+#include "JSWebAssemblyInstance.h"
 #include "VMEntryScope.h"
+#include "WasmContext.h"
+#include "WasmInstance.h"
 #include <wtf/StringPrintStream.h>
 
 namespace JSC {
@@ -185,7 +188,8 @@ Register* CallFrame::topOfFrameInternal()
 
 JSGlobalObject* CallFrame::vmEntryGlobalObject()
 {
-    if (callee()->isObject()) { 
+    RELEASE_ASSERT(callee().isCell());
+    if (callee().asCell()->isObject()) { 
         if (this == lexicalGlobalObject()->globalExec())
             return lexicalGlobalObject();
     }
@@ -197,31 +201,71 @@ JSGlobalObject* CallFrame::vmEntryGlobalObject()
     return vm().entryScope->globalObject();
 }
 
-CallFrame* CallFrame::callerFrame(VMEntryFrame*& currVMEntryFrame)
+JSGlobalObject* CallFrame::vmEntryGlobalObject(VM& vm)
 {
-    if (callerFrameOrVMEntryFrame() == currVMEntryFrame) {
-        VMEntryRecord* currVMEntryRecord = vmEntryRecord(currVMEntryFrame);
-        currVMEntryFrame = currVMEntryRecord->prevTopVMEntryFrame();
-        return currVMEntryRecord->prevTopCallFrame();
+    if (callee().isCell() && callee().asCell()->isObject()) {
+        if (this == lexicalGlobalObject()->globalExec())
+            return lexicalGlobalObject();
     }
-    return static_cast<CallFrame*>(callerFrameOrVMEntryFrame());
+
+    // For any ExecState that's not a globalExec, the 
+    // dynamic global object must be set since code is running
+    ASSERT(vm.entryScope);
+    return vm.entryScope->globalObject();
 }
 
-SUPPRESS_ASAN CallFrame* CallFrame::unsafeCallerFrame(VMEntryFrame*& currVMEntryFrame)
+JSGlobalObject* CallFrame::wasmAwareLexicalGlobalObject(VM& vm)
 {
-    if (unsafeCallerFrameOrVMEntryFrame() == currVMEntryFrame) {
-        VMEntryRecord* currVMEntryRecord = vmEntryRecord(currVMEntryFrame);
-        currVMEntryFrame = currVMEntryRecord->unsafePrevTopVMEntryFrame();
+#if ENABLE(WEBASSEMBLY)
+    if (!callee().isWasm())
+        return lexicalGlobalObject();
+    return vm.wasmContext.load()->owner<JSWebAssemblyInstance>()->globalObject();
+#else
+    UNUSED_PARAM(vm);
+    return lexicalGlobalObject();
+#endif
+}
+
+bool CallFrame::isAnyWasmCallee()
+{
+    CalleeBits callee = this->callee();
+    if (callee.isWasm())
+        return true;
+
+    ASSERT(callee.isCell());
+    if (!!callee.rawPtr() && isWebAssemblyToJSCallee(callee.asCell()))
+        return true;
+
+    return false;
+}
+
+CallFrame* CallFrame::callerFrame(EntryFrame*& currEntryFrame)
+{
+    if (callerFrameOrEntryFrame() == currEntryFrame) {
+        VMEntryRecord* currVMEntryRecord = vmEntryRecord(currEntryFrame);
+        currEntryFrame = currVMEntryRecord->prevTopEntryFrame();
+        return currVMEntryRecord->prevTopCallFrame();
+    }
+    return static_cast<CallFrame*>(callerFrameOrEntryFrame());
+}
+
+SUPPRESS_ASAN CallFrame* CallFrame::unsafeCallerFrame(EntryFrame*& currEntryFrame)
+{
+    if (unsafeCallerFrameOrEntryFrame() == currEntryFrame) {
+        VMEntryRecord* currVMEntryRecord = vmEntryRecord(currEntryFrame);
+        currEntryFrame = currVMEntryRecord->unsafePrevTopEntryFrame();
         return currVMEntryRecord->unsafePrevTopCallFrame();
     }
-    return static_cast<CallFrame*>(unsafeCallerFrameOrVMEntryFrame());
+    return static_cast<CallFrame*>(unsafeCallerFrameOrEntryFrame());
 }
 
 SourceOrigin CallFrame::callerSourceOrigin()
 {
+    RELEASE_ASSERT(callee().isCell());
+    VM* vm = &this->vm();
     SourceOrigin sourceOrigin;
     bool haveSkippedFirstFrame = false;
-    StackVisitor::visit(this, [&](StackVisitor& visitor) {
+    StackVisitor::visit(this, vm, [&](StackVisitor& visitor) {
         if (!std::exchange(haveSkippedFirstFrame, true))
             return StackVisitor::Status::Continue;
 

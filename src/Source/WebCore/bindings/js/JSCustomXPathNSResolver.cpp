@@ -27,6 +27,7 @@
 #include "JSCustomXPathNSResolver.h"
 
 #include "CommonVM.h"
+#include "DOMWindow.h"
 #include "Document.h"
 #include "Frame.h"
 #include "JSDOMExceptionHandling.h"
@@ -34,7 +35,7 @@
 #include "JSMainThreadExecState.h"
 #include "Page.h"
 #include "PageConsoleClient.h"
-#include <runtime/JSLock.h>
+#include <JavaScriptCore/JSLock.h>
 #include <wtf/Ref.h>
 
 namespace WebCore {
@@ -48,7 +49,7 @@ ExceptionOr<Ref<JSCustomXPathNSResolver>> JSCustomXPathNSResolver::create(ExecSt
 
     auto* resolverObject = value.getObject();
     if (!resolverObject)
-        return Exception { TYPE_MISMATCH_ERR };
+        return Exception { TypeMismatchError };
 
     return adoptRef(*new JSCustomXPathNSResolver(state.vm(), resolverObject, asJSDOMWindow(state.vmEntryGlobalObject())));
 }
@@ -59,9 +60,7 @@ JSCustomXPathNSResolver::JSCustomXPathNSResolver(VM& vm, JSObject* customResolve
 {
 }
 
-JSCustomXPathNSResolver::~JSCustomXPathNSResolver()
-{
-}
+JSCustomXPathNSResolver::~JSCustomXPathNSResolver() = default;
 
 String JSCustomXPathNSResolver::lookupNamespaceURI(const String& prefix)
 {
@@ -88,6 +87,7 @@ String JSCustomXPathNSResolver::lookupNamespaceURI(const String& prefix)
 
     MarkedArgumentBuffer args;
     args.append(jsStringWithCache(exec, prefix));
+    ASSERT(!args.hasOverflowed());
 
     NakedPtr<JSC::Exception> exception;
     JSValue retval = JSMainThreadExecState::call(exec, function, callType, callData, m_customResolver.get(), args, exception);

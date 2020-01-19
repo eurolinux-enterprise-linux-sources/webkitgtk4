@@ -43,6 +43,15 @@ class AirplaySupport extends MediaControllerSupport
         this.mediaController.media.webkitShowPlaybackTargetPicker();
     }
 
+    controlsUserVisibilityDidChange()
+    {
+        const controls = this.mediaController.controls;
+        if (controls.visible && !controls.faded)
+            this.enable();
+        else
+            this.disable();
+    }
+
     handleEvent(event)
     {
         if (event.type === "webkitplaybacktargetavailabilitychanged")
@@ -55,6 +64,7 @@ class AirplaySupport extends MediaControllerSupport
     {
         this.control.enabled = !!this._routesAvailable;
         this.control.on = this.mediaController.media.webkitCurrentPlaybackTargetIsWireless;
+        this.mediaController.controls.muteButton.enabled = !this.control.on;
     }
 
 }

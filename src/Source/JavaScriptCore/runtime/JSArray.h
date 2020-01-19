@@ -1,6 +1,6 @@
 /*
  *  Copyright (C) 1999-2000 Harri Porten (porten@kde.org)
- *  Copyright (C) 2003-2017 Apple Inc. All rights reserved.
+ *  Copyright (C) 2003-2018 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include "ArgList.h"
 #include "ArrayConventions.h"
 #include "ButterflyInlines.h"
 #include "JSCellInlines.h"
@@ -30,6 +31,8 @@ namespace JSC {
 class JSArray;
 class LLIntOffsetsExtractor;
 
+extern const char* const LengthExceededTheMaximumArrayLengthError;
+
 class JSArray : public JSNonFinalObject {
     friend class LLIntOffsetsExtractor;
     friend class Walker;
@@ -39,7 +42,7 @@ public:
     typedef JSNonFinalObject Base;
     static const unsigned StructureFlags = Base::StructureFlags | OverridesGetOwnPropertySlot | OverridesGetPropertyNames;
 
-    static size_t allocationSize(size_t inlineCapacity)
+    static size_t allocationSize(Checked<size_t> inlineCapacity)
     {
         ASSERT_UNUSED(inlineCapacity, !inlineCapacity);
         return sizeof(JSArray);
@@ -53,21 +56,28 @@ protected:
 
 public:
     static JSArray* tryCreate(VM&, Structure*, unsigned initialLength = 0);
+    static JSArray* tryCreate(VM&, Structure*, unsigned initialLength, unsigned vectorLengthHint);
     static JSArray* create(VM&, Structure*, unsigned initialLength = 0);
     static JSArray* createWithButterfly(VM&, GCDeferralContext*, Structure*, Butterfly*);
 
-    // tryCreateForInitializationPrivate is used for fast construction of arrays whose size and
-    // contents are known at time of creation. This should be considered a private API.
+    // tryCreateUninitializedRestricted is used for fast construction of arrays whose size and
+    // contents are known at time of creation. This is a restricted API for careful use only in
+    // performance critical code paths. If you don't have a good reason to use it, you probably
+    // shouldn't use it. Instead, you should go with
+    //   - JSArray::tryCreate() or JSArray::create() instead of tryCreateUninitializedRestricted(), and
+    //   - putDirectIndex() instead of initializeIndex().
+    //
     // Clients of this interface must:
     //   - null-check the result (indicating out of memory, or otherwise unable to allocate vector).
     //   - call 'initializeIndex' for all properties in sequence, for 0 <= i < initialLength.
     //   - Provide a valid GCDefferalContext* if they might garbage collect when initializing properties,
     //     otherwise the caller can provide a null GCDefferalContext*.
+    //   - Provide a local stack instance of ObjectInitializationScope at the call site.
     //
-    JS_EXPORT_PRIVATE static JSArray* tryCreateForInitializationPrivate(VM&, GCDeferralContext*, Structure*, unsigned initialLength);
-    static JSArray* tryCreateForInitializationPrivate(VM& vm, Structure* structure, unsigned initialLength)
+    JS_EXPORT_PRIVATE static JSArray* tryCreateUninitializedRestricted(ObjectInitializationScope&, GCDeferralContext*, Structure*, unsigned initialLength);
+    static JSArray* tryCreateUninitializedRestricted(ObjectInitializationScope& scope, Structure* structure, unsigned initialLength)
     {
-        return tryCreateForInitializationPrivate(vm, nullptr, structure, initialLength);
+        return tryCreateUninitializedRestricted(scope, nullptr, structure, initialLength);
     }
 
     JS_EXPORT_PRIVATE static bool defineOwnProperty(JSObject*, ExecState*, PropertyName, const PropertyDescriptor&, bool throwException);
@@ -82,6 +92,7 @@ public:
     // OK to use on new arrays, but not if it might be a RegExpMatchArray or RuntimeArray.
     JS_EXPORT_PRIVATE bool setLength(ExecState*, unsigned, bool throwException = false);
 
+    void pushInline(ExecState*, JSValue);
     JS_EXPORT_PRIVATE void push(ExecState*, JSValue);
     JS_EXPORT_PRIVATE JSValue pop(ExecState*);
 
@@ -105,7 +116,8 @@ public:
 
     bool shiftCountForShift(ExecState* exec, unsigned startIndex, unsigned count)
     {
-        return shiftCountWithArrayStorage(exec->vm(), startIndex, count, ensureArrayStorage(exec->vm()));
+        VM& vm = exec->vm();
+        return shiftCountWithArrayStorage(vm, startIndex, count, ensureArrayStorage(vm));
     }
     bool shiftCountForSplice(ExecState* exec, unsigned& startIndex, unsigned count)
     {
@@ -150,7 +162,7 @@ public:
     JS_EXPORT_PRIVATE void fillArgList(ExecState*, MarkedArgumentBuffer&);
     JS_EXPORT_PRIVATE void copyToArguments(ExecState*, VirtualRegister firstElementDest, unsigned offset, unsigned length);
 
-    bool isIteratorProtocolFastAndNonObservable();
+    JS_EXPORT_PRIVATE bool isIteratorProtocolFastAndNonObservable();
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype, IndexingType indexingType)
     {
@@ -161,6 +173,7 @@ protected:
     void finishCreation(VM& vm)
     {
         Base::finishCreation(vm);
+        ASSERT(jsDynamicCast<JSArray*>(vm, this));
         ASSERT_WITH_MESSAGE(type() == ArrayType || type() == DerivedArrayType, "Instance inheriting JSArray should have either ArrayType or DerivedArrayType");
     }
 
@@ -204,18 +217,12 @@ inline Butterfly* tryCreateArrayButterfly(VM& vm, JSCell* intendedOwner, unsigne
     return butterfly;
 }
 
-inline Butterfly* createArrayButterfly(VM& vm, JSCell* intendedOwner, unsigned initialLength)
-{
-    Butterfly* result = tryCreateArrayButterfly(vm, intendedOwner, initialLength);
-    RELEASE_ASSERT(result);
-    return result;
-}
-
 Butterfly* createArrayButterflyInDictionaryIndexingMode(
     VM&, JSCell* intendedOwner, unsigned initialLength);
 
-inline JSArray* JSArray::tryCreate(VM& vm, Structure* structure, unsigned initialLength)
+inline JSArray* JSArray::tryCreate(VM& vm, Structure* structure, unsigned initialLength, unsigned vectorLengthHint)
 {
+    ASSERT(vectorLengthHint >= initialLength);
     unsigned outOfLineStorage = structure->outOfLineCapacity();
 
     Butterfly* butterfly;
@@ -227,11 +234,14 @@ inline JSArray* JSArray::tryCreate(VM& vm, Structure* structure, unsigned initia
             || hasDouble(indexingType)
             || hasContiguous(indexingType));
 
-        if (initialLength > MAX_STORAGE_VECTOR_LENGTH)
-            return 0;
+        if (UNLIKELY(vectorLengthHint > MAX_STORAGE_VECTOR_LENGTH))
+            return nullptr;
 
-        unsigned vectorLength = Butterfly::optimalContiguousVectorLength(structure, initialLength);
-        void* temp = vm.auxiliarySpace.tryAllocate(nullptr, Butterfly::totalSize(0, outOfLineStorage, true, vectorLength * sizeof(EncodedJSValue)));
+        unsigned vectorLength = Butterfly::optimalContiguousVectorLength(structure, vectorLengthHint);
+        void* temp = vm.jsValueGigacageAuxiliarySpace.allocateNonVirtual(
+            vm,
+            Butterfly::totalSize(0, outOfLineStorage, true, vectorLength * sizeof(EncodedJSValue)),
+            nullptr, AllocationFailureMode::ReturnNull);
         if (!temp)
             return nullptr;
         butterfly = Butterfly::fromBase(temp, 0, outOfLineStorage);
@@ -245,7 +255,7 @@ inline JSArray* JSArray::tryCreate(VM& vm, Structure* structure, unsigned initia
         ASSERT(
             indexingType == ArrayWithSlowPutArrayStorage
             || indexingType == ArrayWithArrayStorage);
-        butterfly = tryCreateArrayButterfly(vm, 0, initialLength);
+        butterfly = tryCreateArrayButterfly(vm, nullptr, initialLength);
         if (!butterfly)
             return nullptr;
         for (unsigned i = 0; i < BASE_ARRAY_STORAGE_VECTOR_LEN; ++i)
@@ -253,6 +263,11 @@ inline JSArray* JSArray::tryCreate(VM& vm, Structure* structure, unsigned initia
     }
 
     return createWithButterfly(vm, nullptr, structure, butterfly);
+}
+
+inline JSArray* JSArray::tryCreate(VM& vm, Structure* structure, unsigned initialLength)
+{
+    return tryCreate(vm, structure, initialLength, initialLength);
 }
 
 inline JSArray* JSArray::create(VM& vm, Structure* structure, unsigned initialLength)
@@ -295,7 +310,8 @@ inline JSArray* constructArray(ExecState* exec, Structure* arrayStructure, const
 {
     VM& vm = exec->vm();
     unsigned length = values.size();
-    JSArray* array = JSArray::tryCreateForInitializationPrivate(vm, arrayStructure, length);
+    ObjectInitializationScope scope(vm);
+    JSArray* array = JSArray::tryCreateUninitializedRestricted(scope, arrayStructure, length);
 
     // FIXME: we should probably throw an out of memory error here, but
     // when making this change we should check that all clients of this
@@ -304,14 +320,15 @@ inline JSArray* constructArray(ExecState* exec, Structure* arrayStructure, const
     RELEASE_ASSERT(array);
 
     for (unsigned i = 0; i < length; ++i)
-        array->initializeIndex(vm, i, values.at(i));
+        array->initializeIndex(scope, i, values.at(i));
     return array;
 }
     
 inline JSArray* constructArray(ExecState* exec, Structure* arrayStructure, const JSValue* values, unsigned length)
 {
     VM& vm = exec->vm();
-    JSArray* array = JSArray::tryCreateForInitializationPrivate(vm, arrayStructure, length);
+    ObjectInitializationScope scope(vm);
+    JSArray* array = JSArray::tryCreateUninitializedRestricted(scope, arrayStructure, length);
 
     // FIXME: we should probably throw an out of memory error here, but
     // when making this change we should check that all clients of this
@@ -320,14 +337,15 @@ inline JSArray* constructArray(ExecState* exec, Structure* arrayStructure, const
     RELEASE_ASSERT(array);
 
     for (unsigned i = 0; i < length; ++i)
-        array->initializeIndex(vm, i, values[i]);
+        array->initializeIndex(scope, i, values[i]);
     return array;
 }
 
 inline JSArray* constructArrayNegativeIndexed(ExecState* exec, Structure* arrayStructure, const JSValue* values, unsigned length)
 {
     VM& vm = exec->vm();
-    JSArray* array = JSArray::tryCreateForInitializationPrivate(vm, arrayStructure, length);
+    ObjectInitializationScope scope(vm);
+    JSArray* array = JSArray::tryCreateUninitializedRestricted(scope, arrayStructure, length);
 
     // FIXME: we should probably throw an out of memory error here, but
     // when making this change we should check that all clients of this
@@ -336,7 +354,7 @@ inline JSArray* constructArrayNegativeIndexed(ExecState* exec, Structure* arrayS
     RELEASE_ASSERT(array);
 
     for (int i = 0; i < static_cast<int>(length); ++i)
-        array->initializeIndex(vm, i, values[-i]);
+        array->initializeIndex(scope, i, values[-i]);
     return array;
 }
 

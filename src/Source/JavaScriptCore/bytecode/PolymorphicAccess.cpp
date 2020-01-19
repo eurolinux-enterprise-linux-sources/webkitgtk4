@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,18 +31,22 @@
 #include "BinarySwitch.h"
 #include "CCallHelpers.h"
 #include "CodeBlock.h"
+#include "FullCodeOrigin.h"
 #include "Heap.h"
 #include "JITOperations.h"
 #include "JSCInlines.h"
 #include "LinkBuffer.h"
 #include "StructureStubClearingWatchpoint.h"
 #include "StructureStubInfo.h"
+#include "SuperSampler.h"
 #include <wtf/CommaPrinter.h>
 #include <wtf/ListDump.h>
 
 namespace JSC {
 
+namespace PolymorphicAccessInternal {
 static const bool verbose = false;
+}
 
 void AccessGenerationResult::dump(PrintStream& out) const
 {
@@ -175,14 +179,14 @@ CallSiteIndex AccessGenerationState::originalCallSiteIndex() const { return stub
 void AccessGenerationState::emitExplicitExceptionHandler()
 {
     restoreScratch();
-    jit->copyCalleeSavesToVMEntryFrameCalleeSavesBuffer();
+    jit->copyCalleeSavesToEntryFrameCalleeSavesBuffer(m_vm.topEntryFrame);
     if (needsToRestoreRegistersIfException()) {
         // To the JIT that produces the original exception handling
         // call site, they will expect the OSR exit to be arrived
         // at from genericUnwind. Therefore we must model what genericUnwind
         // does here. I.e, set callFrameForCatch and copy callee saves.
 
-        jit->storePtr(GPRInfo::callFrameRegister, jit->vm()->addressOfCallFrameForCatch());
+        jit->storePtr(GPRInfo::callFrameRegister, m_vm.addressOfCallFrameForCatch());
         CCallHelpers::Jump jumpToOSRExitExceptionHandler = jit->jump();
 
         // We don't need to insert a new exception handler in the table
@@ -194,13 +198,13 @@ void AccessGenerationState::emitExplicitExceptionHandler()
                 linkBuffer.link(jumpToOSRExitExceptionHandler, originalHandler.nativeCode);
             });
     } else {
-        jit->setupArguments(CCallHelpers::TrustedImmPtr(jit->vm()), GPRInfo::callFrameRegister);
+        jit->setupArguments(CCallHelpers::TrustedImmPtr(&m_vm), GPRInfo::callFrameRegister);
         CCallHelpers::Call lookupExceptionHandlerCall = jit->call();
         jit->addLinkTask(
             [=] (LinkBuffer& linkBuffer) {
                 linkBuffer.link(lookupExceptionHandlerCall, lookupExceptionHandler);
             });
-        jit->jumpToExceptionHandler();
+        jit->jumpToExceptionHandler(m_vm);
     }
 }
 
@@ -209,8 +213,8 @@ PolymorphicAccess::PolymorphicAccess() { }
 PolymorphicAccess::~PolymorphicAccess() { }
 
 AccessGenerationResult PolymorphicAccess::addCases(
-    VM& vm, CodeBlock* codeBlock, StructureStubInfo& stubInfo, const Identifier& ident,
-    Vector<std::unique_ptr<AccessCase>, 2> originalCasesToAdd)
+    const GCSafeConcurrentJSLocker& locker, VM& vm, CodeBlock* codeBlock, StructureStubInfo& stubInfo,
+    const Identifier& ident, Vector<std::unique_ptr<AccessCase>, 2> originalCasesToAdd)
 {
     SuperSamplerScope superSamplerScope(false);
     
@@ -245,7 +249,7 @@ AccessGenerationResult PolymorphicAccess::addCases(
         casesToAdd.append(WTFMove(myCase));
     }
 
-    if (verbose)
+    if (PolymorphicAccessInternal::verbose)
         dataLog("casesToAdd: ", listDump(casesToAdd), "\n");
 
     // If there aren't any cases to add, then fail on the grounds that there's no point to generating a
@@ -254,26 +258,60 @@ AccessGenerationResult PolymorphicAccess::addCases(
     if (casesToAdd.isEmpty())
         return AccessGenerationResult::MadeNoChanges;
 
+    bool shouldReset = false;
+    AccessGenerationResult resetResult(AccessGenerationResult::ResetStubAndFireWatchpoints);
+    auto considerPolyProtoReset = [&] (Structure* a, Structure* b) {
+        if (Structure::shouldConvertToPolyProto(a, b)) {
+            // For now, we only reset if this is our first time invalidating this watchpoint.
+            // The reason we don't immediately fire this watchpoint is that we may be already
+            // watching the poly proto watchpoint, which if fired, would destroy us. We let
+            // the person handling the result to do a delayed fire.
+            ASSERT(a->rareData()->sharedPolyProtoWatchpoint().get() == b->rareData()->sharedPolyProtoWatchpoint().get());
+            if (a->rareData()->sharedPolyProtoWatchpoint()->isStillValid()) {
+                shouldReset = true;
+                resetResult.addWatchpointToFire(*a->rareData()->sharedPolyProtoWatchpoint(), StringFireDetail("Detected poly proto optimization opportunity."));
+            }
+        }
+    };
+
+    for (auto& caseToAdd : casesToAdd) {
+        for (auto& existingCase : m_list) {
+            Structure* a = caseToAdd->structure();
+            Structure* b = existingCase->structure();
+            considerPolyProtoReset(a, b);
+        }
+    }
+    for (unsigned i = 0; i < casesToAdd.size(); ++i) {
+        for (unsigned j = i + 1; j < casesToAdd.size(); ++j) {
+            Structure* a = casesToAdd[i]->structure();
+            Structure* b = casesToAdd[j]->structure();
+            considerPolyProtoReset(a, b);
+        }
+    }
+
+    if (shouldReset)
+        return resetResult;
+
     // Now add things to the new list. Note that at this point, we will still have old cases that
     // may be replaced by the new ones. That's fine. We will sort that out when we regenerate.
     for (auto& caseToAdd : casesToAdd) {
-        commit(vm, m_watchpoints, codeBlock, stubInfo, ident, *caseToAdd);
+        commit(locker, vm, m_watchpoints, codeBlock, stubInfo, ident, *caseToAdd);
         m_list.append(WTFMove(caseToAdd));
     }
     
-    if (verbose)
+    if (PolymorphicAccessInternal::verbose)
         dataLog("After addCases: m_list: ", listDump(m_list), "\n");
 
     return AccessGenerationResult::Buffered;
 }
 
 AccessGenerationResult PolymorphicAccess::addCase(
-    VM& vm, CodeBlock* codeBlock, StructureStubInfo& stubInfo, const Identifier& ident,
-    std::unique_ptr<AccessCase> newAccess)
+    const GCSafeConcurrentJSLocker& locker, VM& vm, CodeBlock* codeBlock, StructureStubInfo& stubInfo,
+    const Identifier& ident, std::unique_ptr<AccessCase> newAccess)
 {
     Vector<std::unique_ptr<AccessCase>, 2> newAccesses;
     newAccesses.append(WTFMove(newAccess));
-    return addCases(vm, codeBlock, stubInfo, ident, WTFMove(newAccesses));
+    return addCases(locker, vm, codeBlock, stubInfo, ident, WTFMove(newAccesses));
 }
 
 bool PolymorphicAccess::visitWeak(VM& vm) const
@@ -309,7 +347,7 @@ void PolymorphicAccess::dump(PrintStream& out) const
 }
 
 void PolymorphicAccess::commit(
-    VM& vm, std::unique_ptr<WatchpointsOnStructureStubInfo>& watchpoints, CodeBlock* codeBlock,
+    const GCSafeConcurrentJSLocker&, VM& vm, std::unique_ptr<WatchpointsOnStructureStubInfo>& watchpoints, CodeBlock* codeBlock,
     StructureStubInfo& stubInfo, const Identifier& ident, AccessCase& accessCase)
 {
     // NOTE: We currently assume that this is relatively rare. It mainly arises for accesses to
@@ -328,25 +366,28 @@ void PolymorphicAccess::commit(
 }
 
 AccessGenerationResult PolymorphicAccess::regenerate(
-    VM& vm, CodeBlock* codeBlock, StructureStubInfo& stubInfo, const Identifier& ident)
+    const GCSafeConcurrentJSLocker& locker, VM& vm, CodeBlock* codeBlock, StructureStubInfo& stubInfo, const Identifier& ident)
 {
     SuperSamplerScope superSamplerScope(false);
     
-    if (verbose)
+    if (PolymorphicAccessInternal::verbose)
         dataLog("Regenerate with m_list: ", listDump(m_list), "\n");
     
-    AccessGenerationState state;
+    AccessGenerationState state(vm, codeBlock->globalObject());
 
     state.access = this;
     state.stubInfo = &stubInfo;
     state.ident = &ident;
     
     state.baseGPR = static_cast<GPRReg>(stubInfo.patch.baseGPR);
+    state.thisGPR = static_cast<GPRReg>(stubInfo.patch.thisGPR);
     state.valueRegs = stubInfo.valueRegs();
 
     ScratchRegisterAllocator allocator(stubInfo.patch.usedRegisters);
     state.allocator = &allocator;
     allocator.lock(state.baseGPR);
+    if (state.thisGPR != InvalidGPRReg)
+        allocator.lock(state.thisGPR);
     allocator.lock(state.valueRegs);
 #if USE(JSVALUE32_64)
     allocator.lock(static_cast<GPRReg>(stubInfo.patch.baseTagGPR));
@@ -354,7 +395,7 @@ AccessGenerationResult PolymorphicAccess::regenerate(
 
     state.scratchGPR = allocator.allocateScratchGPR();
     
-    CCallHelpers jit(&vm, codeBlock);
+    CCallHelpers jit(codeBlock);
     state.jit = &jit;
 
     state.preservedReusedRegisterState =
@@ -397,7 +438,7 @@ AccessGenerationResult PolymorphicAccess::regenerate(
     }
     m_list.resize(dstIndex);
     
-    if (verbose)
+    if (PolymorphicAccessInternal::verbose)
         dataLog("Optimized cases: ", listDump(cases), "\n");
     
     // At this point we're convinced that 'cases' contains the cases that we want to JIT now and we
@@ -406,7 +447,7 @@ AccessGenerationResult PolymorphicAccess::regenerate(
     bool allGuardedByStructureCheck = true;
     bool hasJSGetterSetterCall = false;
     for (auto& newCase : cases) {
-        commit(vm, state.watchpoints, codeBlock, stubInfo, ident, *newCase);
+        commit(locker, vm, state.watchpoints, codeBlock, stubInfo, ident, *newCase);
         allGuardedByStructureCheck &= newCase->guardedByStructureCheck();
         if (newCase->type() == AccessCase::Getter || newCase->type() == AccessCase::Setter)
             hasJSGetterSetterCall = true;
@@ -510,9 +551,9 @@ AccessGenerationResult PolymorphicAccess::regenerate(
         callSiteIndexForExceptionHandling = state.callSiteIndexForExceptionHandling();
     }
 
-    LinkBuffer linkBuffer(vm, jit, codeBlock, JITCompilationCanFail);
+    LinkBuffer linkBuffer(jit, codeBlock, JITCompilationCanFail);
     if (linkBuffer.didFailToAllocate()) {
-        if (verbose)
+        if (PolymorphicAccessInternal::verbose)
             dataLog("Did fail to allocate.\n");
         return AccessGenerationResult::GaveUp;
     }
@@ -523,12 +564,12 @@ AccessGenerationResult PolymorphicAccess::regenerate(
 
     linkBuffer.link(failure, stubInfo.slowPathStartLocation());
     
-    if (verbose)
-        dataLog(*codeBlock, " ", stubInfo.codeOrigin, ": Generating polymorphic access stub for ", listDump(cases), "\n");
+    if (PolymorphicAccessInternal::verbose)
+        dataLog(FullCodeOrigin(codeBlock, stubInfo.codeOrigin), ": Generating polymorphic access stub for ", listDump(cases), "\n");
 
     MacroAssemblerCodeRef code = FINALIZE_CODE_FOR(
         codeBlock, linkBuffer,
-        ("%s", toCString("Access stub for ", *codeBlock, " ", stubInfo.codeOrigin, " with return point ", successLabel, ": ", listDump(cases)).data()));
+        "%s", toCString("Access stub for ", *codeBlock, " ", stubInfo.codeOrigin, " with return point ", successLabel, ": ", listDump(cases)).data());
 
     bool doesCalls = false;
     Vector<JSCell*> cellsToMark;
@@ -539,7 +580,7 @@ AccessGenerationResult PolymorphicAccess::regenerate(
     m_watchpoints = WTFMove(state.watchpoints);
     if (!state.weakReferences.isEmpty())
         m_weakReferences = std::make_unique<Vector<WriteBarrier<JSCell>>>(WTFMove(state.weakReferences));
-    if (verbose)
+    if (PolymorphicAccessInternal::verbose)
         dataLog("Returning: ", code.code(), "\n");
     
     m_list = WTFMove(cases);
@@ -582,6 +623,9 @@ void printInternal(PrintStream& out, AccessGenerationResult::Kind kind)
         return;
     case AccessGenerationResult::GeneratedFinalCode:
         out.print("GeneratedFinalCode");
+        return;
+    case AccessGenerationResult::ResetStubAndFireWatchpoints:
+        out.print("ResetStubAndFireWatchpoints");
         return;
     }
     

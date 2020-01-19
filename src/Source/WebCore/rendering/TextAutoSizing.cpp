@@ -30,9 +30,13 @@
 
 #include "CSSFontSelector.h"
 #include "Document.h"
+#include "FontCascade.h"
 #include "Logging.h"
+#include "RenderBlock.h"
 #include "RenderListMarker.h"
 #include "RenderText.h"
+#include "RenderTextFragment.h"
+#include "RenderTreeBuilder.h"
 #include "StyleResolver.h"
 
 namespace WebCore {
@@ -93,6 +97,9 @@ auto TextAutoSizingValue::adjustTextNodeSizes() -> StillHasNodes
 
     float averageSize = std::round(cumulativeSize / m_autoSizedNodes.size());
 
+    // FIXME: Figure out how to make this code use RenderTreeUpdater/Builder properly.
+    RenderTreeBuilder builder((*m_autoSizedNodes.begin())->renderer()->view());
+
     // Adjust sizes.
     bool firstPass = true;
     for (auto& node : m_autoSizedNodes) {
@@ -141,6 +148,7 @@ auto TextAutoSizingValue::adjustTextNodeSizes() -> StillHasNodes
         else
             specifiedLineHeight = lineHeightLength.value();
 
+        // This calculation matches the line-height computed size calculation in StyleBuilderCustom::applyValueLineHeight().
         int lineHeight = specifiedLineHeight * scaleChange;
         if (lineHeightLength.isFixed() && lineHeightLength.value() == lineHeight)
             continue;
@@ -151,6 +159,18 @@ auto TextAutoSizingValue::adjustTextNodeSizes() -> StillHasNodes
         newParentStyle.setFontDescription(fontDescription);
         newParentStyle.fontCascade().update(&node->document().fontSelector());
         parentRenderer->setStyle(WTFMove(newParentStyle));
+
+        builder.updateAfterDescendants(*parentRenderer);
+    }
+
+    for (auto& node : m_autoSizedNodes) {
+        auto& textRenderer = *node->renderer();
+        if (!is<RenderTextFragment>(textRenderer))
+            continue;
+        auto* block = downcast<RenderTextFragment>(textRenderer).blockForAccompanyingFirstLetter();
+        if (!block)
+            continue;
+        builder.updateAfterDescendants(*block);
     }
 
     return stillHasNodes;
@@ -198,6 +218,27 @@ void TextAutoSizingValue::reset()
         newParentStyle.fontCascade().update(&node->document().fontSelector());
         parentRenderer->setStyle(WTFMove(newParentStyle));
     }
+}
+
+void TextAutoSizing::addTextNode(Text& node, float candidateSize)
+{
+    LOG(TextAutosizing, " addAutoSizedNode %p candidateSize=%f", &node, candidateSize);
+    auto addResult = m_textNodes.add<TextAutoSizingHashTranslator>(node.renderer()->style(), nullptr);
+    if (addResult.isNewEntry)
+        addResult.iterator->value = std::make_unique<TextAutoSizingValue>();
+    addResult.iterator->value->addTextNode(node, candidateSize);
+}
+
+void TextAutoSizing::updateRenderTree()
+{
+    m_textNodes.removeIf([](auto& keyAndValue) {
+        return keyAndValue.value->adjustTextNodeSizes() == TextAutoSizingValue::StillHasNodes::No;
+    });
+}
+
+void TextAutoSizing::reset()
+{
+    m_textNodes.clear();
 }
 
 } // namespace WebCore

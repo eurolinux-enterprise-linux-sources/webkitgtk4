@@ -22,6 +22,7 @@
 #pragma once
 
 #include "AXObjectCache.h"
+#include "AutoplayEvent.h"
 #include "Cursor.h"
 #include "DatabaseDetails.h"
 #include "DisplayRefreshMonitor.h"
@@ -30,6 +31,7 @@
 #include "GraphicsContext.h"
 #include "HTMLMediaElementEnums.h"
 #include "HostWindow.h"
+#include "Icon.h"
 #include "LayerFlushThrottleState.h"
 #include "MediaProducer.h"
 #include "PopupMenu.h"
@@ -39,10 +41,10 @@
 #include "ScrollingCoordinator.h"
 #include "SearchPopupMenu.h"
 #include "WebCoreKeyboardUIMode.h"
-#include <runtime/ConsoleTypes.h>
+#include <JavaScriptCore/ConsoleTypes.h>
+#include <wtf/CompletionHandler.h>
 #include <wtf/Forward.h>
 #include <wtf/Seconds.h>
-#include <wtf/Vector.h>
 
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
 #include "MediaPlaybackTargetContext.h"
@@ -72,6 +74,7 @@ class FileChooser;
 class FileIconLoader;
 class FloatRect;
 class Frame;
+class FrameLoadRequest;
 class Geolocation;
 class GraphicsLayer;
 class GraphicsLayerFactory;
@@ -94,7 +97,6 @@ class MediaPlayerRequestInstallMissingPluginsCallback;
 #endif
 
 struct DateTimeChooserParameters;
-struct FrameLoadRequest;
 struct GraphicsDeviceAdapter;
 struct ViewportArguments;
 struct WindowFeatures;
@@ -164,6 +166,7 @@ public:
 
 #if USE(COORDINATED_GRAPHICS)
     virtual void delegatedScrollRequested(const IntPoint&) = 0;
+    virtual void resetUpdateAtlasForTesting() = 0;
 #endif
 
     virtual IntPoint screenToRootView(const IntPoint&) const = 0;
@@ -175,15 +178,10 @@ public:
 #endif    
 
     virtual PlatformPageClient platformPageClient() const = 0;
-    virtual void scrollbarsModeDidChange() const = 0;
 
 #if ENABLE(CURSOR_SUPPORT)
     virtual void setCursor(const Cursor&) = 0;
     virtual void setCursorHiddenUntilMouseMoves(bool) = 0;
-#endif
-
-#if !USE(REQUEST_ANIMATION_FRAME_TIMER)
-    virtual void scheduleAnimation() = 0;
 #endif
 
     virtual FloatSize screenSize() const { return const_cast<ChromeClient&>(*this).windowRect().size(); }
@@ -315,7 +313,7 @@ public:
         CanvasTrigger = 1 << 3,
         AnimationTrigger = 1 << 4,
         FilterTrigger = 1 << 5,
-        ScrollableInnerFrameTrigger = 1 << 6,
+        ScrollableNonMainFrameTrigger = 1 << 6,
         AnimatedOpacityTrigger = 1 << 7,
         AllTriggers = 0xFFFFFFFF
     };
@@ -336,9 +334,10 @@ public:
 #endif
 
     virtual bool supportsVideoFullscreen(HTMLMediaElementEnums::VideoFullscreenMode) { return false; }
+    virtual bool supportsVideoFullscreenStandby() { return false; }
 
 #if ENABLE(VIDEO)
-    virtual void enterVideoFullscreenForVideoElement(HTMLVideoElement&, HTMLMediaElementEnums::VideoFullscreenMode) { }
+    virtual void enterVideoFullscreenForVideoElement(HTMLVideoElement&, HTMLMediaElementEnums::VideoFullscreenMode, bool standby) { UNUSED_PARAM(standby); }
     virtual void setUpPlaybackControlsManager(HTMLMediaElement&) { }
     virtual void clearPlaybackControlsManager() { }
 #endif
@@ -373,6 +372,8 @@ public:
     virtual void enableSuddenTermination() { }
     virtual void disableSuddenTermination() { }
 
+    virtual void contentRuleListNotification(const WebCore::URL&, const HashSet<std::pair<String, String>>&) { };
+
 #if PLATFORM(WIN)
     virtual void setLastSetCursorToCurrentCursor() = 0;
     virtual void AXStartFrameLoad() = 0;
@@ -382,7 +383,6 @@ public:
     virtual bool selectItemWritingDirectionIsNatural() = 0;
     virtual bool selectItemAlignmentFollowsMenuWritingDirection() = 0;
     // Checks if there is an opened popup, called by RenderMenuList::showPopup().
-    virtual bool hasOpenedPopup() const = 0;
     virtual RefPtr<PopupMenu> createPopupMenu(PopupMenuClient&) const = 0;
     virtual RefPtr<SearchPopupMenu> createSearchPopupMenu(PopupMenuClient&) const = 0;
 
@@ -420,7 +420,7 @@ public:
     virtual bool shouldUseTiledBackingForFrameView(const FrameView&) const { return false; }
 
     virtual void isPlayingMediaDidChange(MediaProducer::MediaStateFlags, uint64_t) { }
-    virtual void didPlayMediaPreventedFromPlayingWithoutUserGesture() { }
+    virtual void handleAutoplayEvent(AutoplayEvent, OptionSet<AutoplayEventFlags>) { }
 
 #if ENABLE(MEDIA_SESSION)
     virtual void hasMediaSessionWithActiveMediaElementsDidChange(bool) { }
@@ -463,10 +463,21 @@ public:
 
     virtual void didInvalidateDocumentMarkerRects() { }
 
-    virtual void reportProcessCPUTime(int64_t, ActivityStateForCPUSampling) { }
+    virtual void reportProcessCPUTime(Seconds, ActivityStateForCPUSampling) { }
+    virtual RefPtr<Icon> createIconForFiles(const Vector<String>& /* filenames */) = 0;
+
+    virtual void hasStorageAccess(String&& /*subFrameHost*/, String&& /*topFrameHost*/, uint64_t /*frameID*/, uint64_t /*pageID*/, WTF::CompletionHandler<void (bool)>&& callback) { callback(false); }
+    virtual void requestStorageAccess(String&& /*subFrameHost*/, String&& /*topFrameHost*/, uint64_t /*frameID*/, uint64_t /*pageID*/, WTF::CompletionHandler<void (bool)>&& callback) { callback(false); }
+
+    virtual void didInsertMenuElement(HTMLMenuElement&) { }
+    virtual void didRemoveMenuElement(HTMLMenuElement&) { }
+    virtual void didInsertMenuItemElement(HTMLMenuItemElement&) { }
+    virtual void didRemoveMenuItemElement(HTMLMenuItemElement&) { }
+
+    virtual void testIncomingSyncIPCMessageWhileWaitingForSyncReply() { }
 
 protected:
-    virtual ~ChromeClient() { }
+    virtual ~ChromeClient() = default;
 };
 
 } // namespace WebCore

@@ -28,9 +28,11 @@
 #if ENABLE(VIDEO)
 
 #include "MediaPlayer.h"
+#include "MediaProducer.h"
 #include "PlatformMediaSession.h"
 #include "SuccessOr.h"
 #include "Timer.h"
+#include <wtf/LoggerHelper.h>
 #include <wtf/TypeCasts.h>
 
 namespace WebCore {
@@ -50,11 +52,15 @@ class Document;
 class HTMLMediaElement;
 class SourceBuffer;
 
-class MediaElementSession final : public PlatformMediaSession {
+class MediaElementSession final : public PlatformMediaSession
+#if !RELEASE_LOG_DISABLED
+    , private LoggerHelper
+#endif
+{
     WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit MediaElementSession(HTMLMediaElement&);
-    virtual ~MediaElementSession() { }
+    virtual ~MediaElementSession() = default;
 
     void registerWithDocument(Document&);
     void unregisterWithDocument(Document&);
@@ -108,6 +114,7 @@ public:
         OverrideUserGestureRequirementForMainContent = 1 << 12,
         RequireUserGestureToControlControlsManager = 1 << 13,
         RequirePlaybackToControlControlsManager = 1 << 14,
+        RequireUserGestureForVideoDueToLowPowerMode = 1 << 15,
         AllRestrictions = ~NoRestrictions,
     };
     typedef unsigned BehaviorRestrictions;
@@ -140,6 +147,14 @@ public:
             || type == Audio
             || type == VideoAudio;
     }
+
+#if !RELEASE_LOG_DISABLED
+    const Logger& logger() const final;
+    const void* logIdentifier() const final;
+    const char* logClassName() const final { return "MediaElementSession"; }
+    WTFLogChannel& logChannel() const final;
+#endif
+    bool willLog(WTFLogLevel) const;
 
 private:
 

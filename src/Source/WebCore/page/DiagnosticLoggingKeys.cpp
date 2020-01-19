@@ -343,6 +343,41 @@ String DiagnosticLoggingKeys::documentLoaderStoppingKey()
     return ASCIILiteral("documentLoaderStopping");
 }
 
+String DiagnosticLoggingKeys::domainCausingCrashKey()
+{
+    return ASCIILiteral("DomainCausingCrash");
+}
+
+String DiagnosticLoggingKeys::domainCausingEnergyDrainKey()
+{
+    return ASCIILiteral("DomainCausingEnergyDrain");
+}
+
+String DiagnosticLoggingKeys::domainCausingJetsamKey()
+{
+    return ASCIILiteral("DomainCausingJetsam");
+}
+
+String DiagnosticLoggingKeys::simulatedPageCrashKey()
+{
+    return ASCIILiteral("SimulatedPageCrash");
+}
+
+String DiagnosticLoggingKeys::exceededActiveMemoryLimitKey()
+{
+    return ASCIILiteral("ExceededActiveMemoryLimit");
+}
+
+String DiagnosticLoggingKeys::exceededInactiveMemoryLimitKey()
+{
+    return ASCIILiteral("ExceededInactiveMemoryLimit");
+}
+
+String DiagnosticLoggingKeys::exceededBackgroundCPULimitKey()
+{
+    return ASCIILiteral("ExceededBackgroundCPULimit");
+}
+
 String DiagnosticLoggingKeys::domainVisitedKey()
 {
     return ASCIILiteral("DomainVisited");
@@ -377,6 +412,13 @@ String DiagnosticLoggingKeys::applicationCacheKey()
 {
     return ASCIILiteral("applicationCache");
 }
+
+#if ENABLE(APPLICATION_MANIFEST)
+String DiagnosticLoggingKeys::applicationManifestKey()
+{
+    return ASCIILiteral("applicationManifest");
+}
+#endif
 
 String DiagnosticLoggingKeys::audioKey()
 {
@@ -421,11 +463,6 @@ String DiagnosticLoggingKeys::deviceMotionKey()
 String DiagnosticLoggingKeys::deviceOrientationKey()
 {
     return ASCIILiteral("deviceOrientation");
-}
-
-String DiagnosticLoggingKeys::deviceProximityKey()
-{
-    return ASCIILiteral("deviceProximity");
 }
 
 String DiagnosticLoggingKeys::diskCacheKey()
@@ -478,6 +515,11 @@ String DiagnosticLoggingKeys::reloadFromOriginKey()
     return ASCIILiteral("reloadFromOrigin");
 }
 
+String DiagnosticLoggingKeys::reloadRevalidatingExpiredKey()
+{
+    return ASCIILiteral("reloadRevalidatingExpired");
+}
+
 String DiagnosticLoggingKeys::sameLoadKey()
 {
     return ASCIILiteral("sameLoad");
@@ -486,6 +528,11 @@ String DiagnosticLoggingKeys::sameLoadKey()
 String DiagnosticLoggingKeys::scriptKey()
 {
     return ASCIILiteral("script");
+}
+
+String DiagnosticLoggingKeys::serviceWorkerKey()
+{
+    return ASCIILiteral("serviceWorker");
 }
 
 String DiagnosticLoggingKeys::streamingMedia()
@@ -732,5 +779,10 @@ String DiagnosticLoggingKeys::backgroundCPUUsageToDiagnosticLoggingKey(double cp
     return ASCIILiteral("over70");
 }
 
+String DiagnosticLoggingKeys::resourceLoadStatisticsTelemetryKey()
+{
+    return ASCIILiteral("resourceLoadStatisticsTelemetry");
+}
+    
 } // namespace WebCore
 

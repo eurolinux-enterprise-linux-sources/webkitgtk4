@@ -66,7 +66,10 @@ public:
     
     Color visitedLinkTextStrokeColor;
     Color visitedLinkTextFillColor;
-    Color visitedLinkTextEmphasisColor;    
+    Color visitedLinkTextEmphasisColor;
+
+    Color caretColor;
+    Color visitedLinkCaretColor;
 
     std::unique_ptr<ShadowData> textShadow; // Our text shadow information for shadowed text drawing.
     
@@ -92,7 +95,7 @@ public:
     unsigned lineBreak : 3; // LineBreak
     unsigned userSelect : 2; // EUserSelect
     unsigned colorSpace : 1; // ColorSpace
-    unsigned speak : 3; // ESpeak
+    unsigned speakAs : 4; // ESpeakAs
     unsigned hyphens : 2; // Hyphens
     unsigned textEmphasisFill : 1; // TextEmphasisFill
     unsigned textEmphasisMark : 3; // TextEmphasisMark
@@ -139,8 +142,13 @@ public:
     unsigned paintOrder : 3; // PaintOrder
     unsigned capStyle : 2; // LineCap
     unsigned joinStyle : 2; // LineJoin
+    unsigned hasSetStrokeWidth : 1;
+    unsigned hasSetStrokeColor : 1;
     Length strokeWidth;
-    
+    Color strokeColor;
+    Color visitedLinkStrokeColor;
+    float miterLimit;
+
     AtomicString hyphenationString;
     short hyphenationLimitBefore;
     short hyphenationLimitAfter;

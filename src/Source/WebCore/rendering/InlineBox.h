@@ -23,6 +23,7 @@
 #include "RenderBoxModelObject.h"
 #include "RenderText.h"
 #include "TextFlags.h"
+#include <wtf/IsoMalloc.h>
 #include <wtf/TypeCasts.h>
 
 namespace WebCore {
@@ -34,7 +35,7 @@ class RootInlineBox;
 // InlineBox represents a rectangle that occurs on a line.  It corresponds to
 // some RenderObject (i.e., it represents a portion of that RenderObject).
 class InlineBox {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_ISO_ALLOCATED(InlineBox);
 public:
     virtual ~InlineBox();
 
@@ -76,8 +77,8 @@ public:
     void showNodeTreeForThis() const;
     void showLineTreeForThis() const;
     
-    virtual void showLineTreeAndMark(const InlineBox* markedBox, int depth) const;
-    virtual void showLineBox(bool mark, int depth) const;
+    virtual void outputLineTreeAndMark(WTF::TextStream&, const InlineBox* markedBox, int depth) const;
+    virtual void outputLineBox(WTF::TextStream&, bool mark, int depth) const;
     virtual const char* boxName() const;
 #endif
 
@@ -254,11 +255,11 @@ public:
         return nullptr;
     }
 
-    FloatPoint locationIncludingFlipping();
-    void flipForWritingMode(FloatRect&);
-    FloatPoint flipForWritingMode(const FloatPoint&);
-    void flipForWritingMode(LayoutRect&);
-    LayoutPoint flipForWritingMode(const LayoutPoint&);
+    FloatPoint locationIncludingFlipping() const;
+    void flipForWritingMode(FloatRect&) const;
+    FloatPoint flipForWritingMode(const FloatPoint&) const;
+    void flipForWritingMode(LayoutRect&) const;
+    LayoutPoint flipForWritingMode(const LayoutPoint&) const;
 
     bool knownToHaveNoOverflow() const { return m_bitfields.knownToHaveNoOverflow(); }
     void clearKnownToHaveNoOverflow();
@@ -287,9 +288,7 @@ private:
 
     RenderObject& m_renderer;
 
-public:
-    FloatPoint m_topLeft;
-    float m_logicalWidth { 0 };
+    float m_expansion { 0 };
 
 #define ADD_BOOLEAN_BITFIELD(name, Name) \
     private:\
@@ -367,8 +366,6 @@ public:
     };
 #undef ADD_BOOLEAN_BITFIELD
 
-private:
-    float m_expansion { 0 };
     InlineBoxBitfields m_bitfields;
 
 protected:
@@ -382,9 +379,9 @@ protected:
         , m_prev(prev)
         , m_parent(parent)
         , m_renderer(renderer)
+        , m_bitfields(firstLine, constructed, dirty, extracted, isHorizontal)
         , m_topLeft(topLeft)
         , m_logicalWidth(logicalWidth)
-        , m_bitfields(firstLine, constructed, dirty, extracted, isHorizontal)
     {
     }
 
@@ -411,14 +408,18 @@ protected:
     // For InlineFlowBox and InlineTextBox
     bool extracted() const { return m_bitfields.extracted(); }
 
-#if !ASSERT_WITH_SECURITY_IMPLICATION_DISABLED
 protected:
-    bool m_isEverInChildList { true };
+    FloatPoint m_topLeft;
+    float m_logicalWidth { 0 };
+
+#if !ASSERT_WITH_SECURITY_IMPLICATION_DISABLED
 private:
     static constexpr unsigned deletionSentinelNotDeletedValue = 0xF0F0F0F0U;
     static constexpr unsigned deletionSentinelDeletedValue = 0xF0DEADF0U;
     unsigned m_deletionSentinel { deletionSentinelNotDeletedValue };
     bool m_hasBadParent { false };
+protected:
+    bool m_isEverInChildList { true };
 #endif
 };
 

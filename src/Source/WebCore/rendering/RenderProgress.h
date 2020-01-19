@@ -27,6 +27,7 @@ namespace WebCore {
 class HTMLProgressElement;
 
 class RenderProgress final : public RenderBlockFlow {
+    WTF_MAKE_ISO_ALLOCATED(RenderProgress);
 public:
     RenderProgress(HTMLElement&, RenderStyle&&);
     virtual ~RenderProgress();
@@ -50,7 +51,7 @@ private:
 
     double m_position;
     double m_animationStartTime;
-    double m_animationRepeatInterval;
+    Seconds m_animationRepeatInterval;
     double m_animationDuration;
     bool m_animating;
     Timer m_animationTimer;

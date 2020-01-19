@@ -39,10 +39,15 @@ namespace JSC { namespace DFG {
 
 void handleExitCounts(CCallHelpers& jit, const OSRExitBase& exit)
 {
-    jit.add32(AssemblyHelpers::TrustedImm32(1), AssemblyHelpers::AbsoluteAddress(&exit.m_count));
-
-    if (!exitKindMayJettison(exit.m_kind))
+    if (!exitKindMayJettison(exit.m_kind)) {
+        // FIXME: We may want to notice that we're frequently exiting
+        // at an op_catch that we didn't compile an entrypoint for, and
+        // then trigger a reoptimization of this CodeBlock:
+        // https://bugs.webkit.org/show_bug.cgi?id=175842
         return;
+    }
+
+    jit.add32(AssemblyHelpers::TrustedImm32(1), AssemblyHelpers::AbsoluteAddress(&exit.m_count));
     
     jit.move(AssemblyHelpers::TrustedImmPtr(jit.codeBlock()), GPRInfo::regT0);
     
@@ -217,7 +222,7 @@ void reifyInlinedCallFrames(CCallHelpers& jit, const OSRExitBase& exit)
             GPRInfo::regT2);
 
         if (!inlineCallFrame->isVarargs())
-            jit.store32(AssemblyHelpers::TrustedImm32(inlineCallFrame->arguments.size()), AssemblyHelpers::payloadFor((VirtualRegister)(inlineCallFrame->stackOffset + CallFrameSlot::argumentCount)));
+            jit.store32(AssemblyHelpers::TrustedImm32(inlineCallFrame->argumentCountIncludingThis), AssemblyHelpers::payloadFor((VirtualRegister)(inlineCallFrame->stackOffset + CallFrameSlot::argumentCount)));
 #if USE(JSVALUE64)
         jit.store64(callerFrameGPR, AssemblyHelpers::addressForByteOffset(inlineCallFrame->callerFrameOffset()));
         uint32_t locationBits = CallSiteIndex(codeOrigin->bytecodeIndex).bits();
@@ -253,7 +258,7 @@ static void osrWriteBarrier(CCallHelpers& jit, GPRReg owner, GPRReg scratch)
 
     // We need these extra slots because setupArgumentsWithExecState will use poke on x86.
 #if CPU(X86)
-    jit.subPtr(MacroAssembler::TrustedImm32(sizeof(void*) * 3), MacroAssembler::stackPointerRegister);
+    jit.subPtr(MacroAssembler::TrustedImm32(sizeof(void*) * 4), MacroAssembler::stackPointerRegister);
 #endif
 
     jit.setupArgumentsWithExecState(owner);
@@ -261,13 +266,13 @@ static void osrWriteBarrier(CCallHelpers& jit, GPRReg owner, GPRReg scratch)
     jit.call(scratch);
 
 #if CPU(X86)
-    jit.addPtr(MacroAssembler::TrustedImm32(sizeof(void*) * 3), MacroAssembler::stackPointerRegister);
+    jit.addPtr(MacroAssembler::TrustedImm32(sizeof(void*) * 4), MacroAssembler::stackPointerRegister);
 #endif
 
     ownerIsRememberedOrInEden.link(&jit);
 }
 
-void adjustAndJumpToTarget(CCallHelpers& jit, const OSRExitBase& exit)
+void adjustAndJumpToTarget(VM& vm, CCallHelpers& jit, const OSRExitBase& exit)
 {
     jit.memoryFence();
     
@@ -309,7 +314,7 @@ void adjustAndJumpToTarget(CCallHelpers& jit, const OSRExitBase& exit)
     jit.addPtr(AssemblyHelpers::TrustedImm32(JIT::stackPointerOffsetFor(codeBlockForExit) * sizeof(Register)), GPRInfo::callFrameRegister, AssemblyHelpers::stackPointerRegister);
     if (exit.isExceptionHandler()) {
         // Since we're jumping to op_catch, we need to set callFrameForCatch.
-        jit.storePtr(GPRInfo::callFrameRegister, jit.vm()->addressOfCallFrameForCatch());
+        jit.storePtr(GPRInfo::callFrameRegister, vm.addressOfCallFrameForCatch());
     }
     
     jit.move(AssemblyHelpers::TrustedImmPtr(jumpTarget), GPRInfo::regT2);

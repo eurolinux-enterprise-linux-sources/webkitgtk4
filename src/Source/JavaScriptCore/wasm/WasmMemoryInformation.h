@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,7 +28,12 @@
 #if ENABLE(WEBASSEMBLY)
 
 #include "GPRInfo.h"
+#include "RegisterSet.h"
+#include "WasmMemory.h"
 #include "WasmPageCount.h"
+
+#include <wtf/Forward.h>
+#include <wtf/Ref.h>
 #include <wtf/Vector.h>
 
 namespace JSC { namespace Wasm {
@@ -38,11 +43,30 @@ struct PinnedSizeRegisterInfo {
     unsigned sizeOffset;
 };
 
-struct PinnedRegisterInfo {
+class PinnedRegisterInfo {
+public:
+    PinnedRegisterInfo(Vector<PinnedSizeRegisterInfo>&&, GPRReg, GPRReg, GPRReg);
+
+    static const PinnedRegisterInfo& get();
+
+    RegisterSet toSave(MemoryMode mode) const
+    {
+        RegisterSet result;
+        result.set(baseMemoryPointer);
+        if (wasmContextInstancePointer != InvalidGPRReg)
+            result.set(wasmContextInstancePointer);
+        if (mode != MemoryMode::Signaling) {
+            result.set(indexingMask);
+            for (const auto& info : sizeRegisters)
+                result.set(info.sizeRegister);
+        }
+        return result;
+    }
+
     Vector<PinnedSizeRegisterInfo> sizeRegisters;
     GPRReg baseMemoryPointer;
-    static const PinnedRegisterInfo& get();
-    PinnedRegisterInfo(Vector<PinnedSizeRegisterInfo>&&, GPRReg);
+    GPRReg indexingMask;
+    GPRReg wasmContextInstancePointer;
 };
 
 class MemoryInformation {

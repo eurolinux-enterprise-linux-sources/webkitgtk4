@@ -28,16 +28,16 @@
 
 #if ENABLE(RESOURCE_USAGE) && OS(LINUX)
 
-#include "CurrentProcessMemoryStatus.h"
+#include <JavaScriptCore/GCActivityCallback.h>
+#include <JavaScriptCore/VM.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <heap/GCActivityCallback.h>
-#include <runtime/VM.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <wtf/linux/CurrentProcessMemoryStatus.h>
 
 namespace WebCore {
 

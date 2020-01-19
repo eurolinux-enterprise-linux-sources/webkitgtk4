@@ -88,7 +88,7 @@ EncodedJSValue JSC_HOST_CALL dataViewProtoGetterByteOffset(ExecState*);
 namespace JSC {
 
 const ClassInfo JSDataViewPrototype::s_info = {
-    "DataViewPrototype", &Base::s_info, &dataViewTable,
+    "DataViewPrototype", &Base::s_info, &dataViewTable, nullptr,
     CREATE_METHOD_TABLE(JSDataViewPrototype)
 };
 
@@ -109,7 +109,7 @@ JSDataViewPrototype* JSDataViewPrototype::create(VM& vm, Structure* structure)
 void JSDataViewPrototype::finishCreation(JSC::VM& vm)
 {
     Base::finishCreation(vm);
-    putDirectWithoutTransition(vm, vm.propertyNames->toStringTagSymbol, jsString(&vm, "DataView"), DontEnum | ReadOnly);
+    putDirectWithoutTransition(vm, vm.propertyNames->toStringTagSymbol, jsString(&vm, "DataView"), PropertyAttribute::DontEnum | PropertyAttribute::ReadOnly);
 }
 
 Structure* JSDataViewPrototype::createStructure(

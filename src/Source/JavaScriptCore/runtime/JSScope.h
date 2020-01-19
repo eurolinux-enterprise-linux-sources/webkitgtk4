@@ -38,7 +38,7 @@ class WatchpointSet;
 class JSScope : public JSNonFinalObject {
 public:
     typedef JSNonFinalObject Base;
-    static const unsigned StructureFlags = Base::StructureFlags;
+    static const unsigned StructureFlags = Base::StructureFlags | OverridesToThis;
 
     friend class LLIntOffsetsExtractor;
     static size_t offsetOfNext();
@@ -46,6 +46,7 @@ public:
     static JSObject* objectAtScope(JSScope*);
 
     static JSObject* resolve(ExecState*, JSScope*, const Identifier&);
+    static JSValue resolveScopeForHoistingFuncDeclInEval(ExecState*, JSScope*, const Identifier&);
     static ResolveOp abstractResolve(ExecState*, size_t depthOffset, JSScope*, const Identifier&, GetOrPut, ResolveType, InitializationMode);
 
     static bool hasConstantScope(ResolveType);
@@ -73,8 +74,13 @@ public:
 
     SymbolTable* symbolTable(VM&);
 
+    JS_EXPORT_PRIVATE static JSValue toThis(JSCell*, ExecState*, ECMAMode);
+
 protected:
     JSScope(VM&, Structure*, JSScope* next);
+
+    template<typename ReturnPredicateFunctor, typename SkipPredicateFunctor>
+    static JSObject* resolve(ExecState*, JSScope*, const Identifier&, ReturnPredicateFunctor, SkipPredicateFunctor);
 
 private:
     WriteBarrier<JSScope> m_next;

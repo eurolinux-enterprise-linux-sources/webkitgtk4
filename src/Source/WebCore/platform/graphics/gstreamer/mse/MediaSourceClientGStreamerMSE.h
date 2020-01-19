@@ -48,10 +48,10 @@ public:
     // From SourceBufferPrivateGStreamer.
     void abort(RefPtr<SourceBufferPrivateGStreamer>);
     void resetParserState(RefPtr<SourceBufferPrivateGStreamer>);
-    bool append(RefPtr<SourceBufferPrivateGStreamer>, const unsigned char*, unsigned);
+    bool append(RefPtr<SourceBufferPrivateGStreamer>, Vector<unsigned char>&&);
     void removedFromMediaSource(RefPtr<SourceBufferPrivateGStreamer>);
     void flush(AtomicString);
-    void enqueueSample(PassRefPtr<MediaSample>);
+    void enqueueSample(Ref<MediaSample>&&);
 
     void clearPlayerPrivate();
 

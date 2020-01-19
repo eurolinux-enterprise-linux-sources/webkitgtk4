@@ -44,19 +44,15 @@
 #include "IgnoreOpensDuringUnloadCountIncrementer.h"
 #include "Logging.h"
 #include "MainFrame.h"
-#include "MemoryPressureHandler.h"
-#include "NoEventDispatchAssertion.h"
 #include "Page.h"
+#include "ScriptDisallowedScope.h"
 #include "Settings.h"
 #include "SubframeLoader.h"
+#include <wtf/MemoryPressureHandler.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/SetForScope.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/StringConcatenate.h>
-
-#if ENABLE(PROXIMITY_EVENTS)
-#include "DeviceProximityController.h"
-#endif
 
 namespace WebCore {
 
@@ -160,6 +156,13 @@ static bool canCacheFrame(Frame& frame, DiagnosticLoggingClient& diagnosticLoggi
         logPageCacheFailureDiagnosticMessage(diagnosticLoggingClient, DiagnosticLoggingKeys::cannotSuspendActiveDOMObjectsKey());
         isCacheable = false;
     }
+#if ENABLE(SERVICE_WORKER)
+    if (frame.document() && frame.document()->activeServiceWorker()) {
+        PCLOG("   -The document has an active service worker");
+        logPageCacheFailureDiagnosticMessage(diagnosticLoggingClient, DiagnosticLoggingKeys::serviceWorkerKey());
+        isCacheable = false;
+    }
+#endif
     // FIXME: We should investigating caching frames that have an associated
     // application cache. <rdar://problem/5917899> tracks that work.
     if (!documentLoader->applicationCacheHost().canCacheInPageCache()) {
@@ -186,12 +189,14 @@ static bool canCacheFrame(Frame& frame, DiagnosticLoggingClient& diagnosticLoggi
 
 static bool canCachePage(Page& page)
 {
+    RELEASE_ASSERT(!page.isRestoringCachedPage());
+
     unsigned indentLevel = 0;
     PCLOG("--------\n Determining if page can be cached:");
 
     DiagnosticLoggingClient& diagnosticLoggingClient = page.diagnosticLoggingClient();
     bool isCacheable = canCacheFrame(page.mainFrame(), diagnosticLoggingClient, indentLevel + 1);
-    
+
     if (!page.settings().usesPageCache() || page.isResourceCachingDisabled()) {
         PCLOG("   -Page settings says b/f cache disabled");
         logPageCacheFailureDiagnosticMessage(diagnosticLoggingClient, DiagnosticLoggingKeys::isDisabledKey());
@@ -209,13 +214,7 @@ static bool canCachePage(Page& page)
         isCacheable = false;
     }
 #endif
-#if ENABLE(PROXIMITY_EVENTS)
-    if (DeviceProximityController::isActiveAt(page)) {
-        PCLOG("   -Page is using DeviceProximity");
-        logPageCacheFailureDiagnosticMessage(diagnosticLoggingClient, deviceProximityKey);
-        isCacheable = false;
-    }
-#endif
+
     FrameLoadType loadType = page.mainFrame().loader().loadType();
     switch (loadType) {
     case FrameLoadType::Reload:
@@ -246,6 +245,13 @@ static bool canCachePage(Page& page)
         // No point writing to the cache on a reload, since we will just write over it again when we leave that page.
         PCLOG("   -Load type is: ReloadFromOrigin");
         logPageCacheFailureDiagnosticMessage(diagnosticLoggingClient, DiagnosticLoggingKeys::reloadFromOriginKey());
+        isCacheable = false;
+        break;
+    }
+    case FrameLoadType::ReloadExpiredOnly: {
+        // No point writing to the cache on a reload, since we will just write over it again when we leave that page.
+        PCLOG("   -Load type is: ReloadRevalidatingExpired");
+        logPageCacheFailureDiagnosticMessage(diagnosticLoggingClient, DiagnosticLoggingKeys::reloadRevalidatingExpiredKey());
         isCacheable = false;
         break;
     }
@@ -367,7 +373,7 @@ static void setPageCacheState(Page& page, Document::PageCacheState pageCacheStat
 // Note that destruction happens bottom-up so that the main frame's tree dies last.
 static void destroyRenderTree(MainFrame& mainFrame)
 {
-    for (Frame* frame = mainFrame.tree().traversePreviousWithWrap(true); frame; frame = frame->tree().traversePreviousWithWrap(false)) {
+    for (Frame* frame = mainFrame.tree().traversePrevious(CanWrap::Yes); frame; frame = frame->tree().traversePrevious(CanWrap::No)) {
         if (!frame->document())
             continue;
         auto& document = *frame->document();
@@ -402,6 +408,8 @@ void PageCache::addIfCacheable(HistoryItem& item, Page* page)
     if (!page || !canCache(*page))
         return;
 
+    ASSERT_WITH_MESSAGE(!page->isUtilityPage(), "Utility pages such as SVGImage pages should never go into PageCache");
+
     setPageCacheState(*page, Document::AboutToEnterPageCache);
 
     // Focus the main frame, defocusing a focused subframe (if we have one). We do this here,
@@ -423,13 +431,14 @@ void PageCache::addIfCacheable(HistoryItem& item, Page* page)
 
     setPageCacheState(*page, Document::InPageCache);
 
-    // Make sure we no longer fire any JS events past this point.
-    NoEventDispatchAssertion assertNoEventDispatch;
+    {
+        // Make sure we don't fire any JS events in this scope.
+        ScriptDisallowedScope::InMainThread scriptDisallowedScope;
 
-    item.m_cachedPage = std::make_unique<CachedPage>(*page);
-    item.m_pruningReason = PruningReason::None;
-    m_items.add(&item);
-    
+        item.m_cachedPage = std::make_unique<CachedPage>(*page);
+        item.m_pruningReason = PruningReason::None;
+        m_items.add(&item);
+    }
     prune(PruningReason::ReachedMaxSize);
 }
 
@@ -455,6 +464,11 @@ std::unique_ptr<CachedPage> PageCache::take(HistoryItem& item, Page* page)
 
 void PageCache::removeAllItemsForPage(Page& page)
 {
+#if !ASSERT_DISABLED
+    ASSERT_WITH_MESSAGE(!m_isInRemoveAllItemsForPage, "We should not reenter this method");
+    SetForScope<bool> inRemoveAllItemsForPageScope { m_isInRemoveAllItemsForPage, true };
+#endif
+
     for (auto it = m_items.begin(); it != m_items.end();) {
         // Increment iterator first so it stays valid after the removal.
         auto current = it;

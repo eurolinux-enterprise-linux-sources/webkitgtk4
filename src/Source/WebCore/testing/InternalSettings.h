@@ -81,7 +81,9 @@ public:
     ExceptionOr<void> setUseLegacyBackgroundSizeShorthandBehavior(bool);
     ExceptionOr<void> setAutoscrollForDragAndDropEnabled(bool);
     ExceptionOr<void> setFontFallbackPrefersPictographs(bool);
-    ExceptionOr<void> setWebFontsAlwaysFallBack(bool);
+    enum class FontLoadTimingOverride { Block, Swap, Failure };
+    ExceptionOr<void> setFontLoadTimingOverride(const FontLoadTimingOverride&);
+    ExceptionOr<void> setShouldIgnoreFontLoadCompletions(bool);
     ExceptionOr<void> setQuickTimePluginReplacementEnabled(bool);
     ExceptionOr<void> setYouTubeFlashPluginReplacementEnabled(bool);
     ExceptionOr<void> setBackgroundShouldExtendBeyondPage(bool);
@@ -95,6 +97,12 @@ public:
     ExceptionOr<void> setUserInterfaceDirectionPolicy(const String&);
     ExceptionOr<String> systemLayoutDirection();
     ExceptionOr<void> setSystemLayoutDirection(const String&);
+    ExceptionOr<void> setShouldMockBoldSystemFontForAccessibility(bool);
+    ExceptionOr<void> setShouldManageAudioSessionCategory(bool);
+    ExceptionOr<void> setCustomPasteboardDataEnabled(bool);
+
+    using FrameFlatteningValue = FrameFlattening;
+    ExceptionOr<void> setFrameFlattening(FrameFlatteningValue);
     
     static void setAllowsAnySSLCertificate(bool);
 
@@ -113,6 +121,9 @@ public:
     static void setIndexedDBWorkersEnabled(bool);
     static void setCSSGridLayoutEnabled(bool);
     static void setWebGL2Enabled(bool);
+    static void setWebGPUEnabled(bool);
+    static void setWebVREnabled(bool);
+    static void setScreenCaptureEnabled(bool);
 
 private:
     explicit InternalSettings(Page*);
@@ -147,7 +158,7 @@ private:
         bool m_originalUsesOverlayScrollbars;
         bool m_imagesEnabled;
         bool m_preferMIMETypeForImages;
-        std::chrono::milliseconds m_minimumTimerInterval;
+        Seconds m_minimumDOMTimerInterval;
 #if ENABLE(VIDEO_TRACK)
         bool m_shouldDisplaySubtitles;
         bool m_shouldDisplayCaptions;
@@ -155,14 +166,14 @@ private:
 #endif
         String m_defaultVideoPosterURL;
         bool m_forcePendingWebGLPolicy;
-        bool m_originalTimeWithoutMouseMovementBeforeHidingControls;
+        Seconds m_originalTimeWithoutMouseMovementBeforeHidingControls;
         bool m_useLegacyBackgroundSizeShorthandBehavior;
         bool m_autoscrollForDragAndDropEnabled;
         bool m_quickTimePluginReplacementEnabled;
         bool m_youTubeFlashPluginReplacementEnabled;
         bool m_shouldConvertPositionStyleOnCopy;
         bool m_fontFallbackPrefersPictographs;
-        bool m_webFontsAlwaysFallBack;
+        bool m_shouldIgnoreFontLoadCompletions;
         bool m_backgroundShouldExtendBeyondPage;
         SecurityOrigin::StorageBlockingPolicy m_storageBlockingPolicy;
         bool m_scrollingTreeIncludesFrames;
@@ -184,11 +195,22 @@ private:
         Settings::ForcedAccessibilityValue m_forcedColorsAreInvertedAccessibilityValue;
         Settings::ForcedAccessibilityValue m_forcedDisplayIsMonochromeAccessibilityValue;
         Settings::ForcedAccessibilityValue m_forcedPrefersReducedMotionAccessibilityValue;
+        Settings::FontLoadTimingOverride m_fontLoadTimingOverride;
+        FrameFlattening m_frameFlattening;
 
         // Runtime enabled settings.
         bool m_indexedDBWorkersEnabled;
         bool m_cssGridLayoutEnabled;
         bool m_webGL2Enabled;
+        bool m_webGPUEnabled;
+        bool m_webVREnabled;
+        bool m_setScreenCaptureEnabled;
+        
+        bool m_shouldMockBoldSystemFontForAccessibility;
+#if USE(AUDIO_SESSION)
+        bool m_shouldManageAudioSessionCategory;
+#endif
+        bool m_customPasteboardDataEnabled;
     };
 
     Page* m_page;

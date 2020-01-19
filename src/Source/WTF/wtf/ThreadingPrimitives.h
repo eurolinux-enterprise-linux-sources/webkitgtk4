@@ -31,10 +31,10 @@
 #ifndef ThreadingPrimitives_h
 #define ThreadingPrimitives_h
 
-#include <wtf/Assertions.h>
 #include <wtf/FastMalloc.h>
 #include <wtf/Locker.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/WallTime.h>
 
 #if OS(WINDOWS)
 #include <windows.h>
@@ -46,10 +46,15 @@
 
 namespace WTF {
 
+using ThreadFunction = void (*)(void* argument);
+
 #if USE(PTHREADS)
-typedef pthread_mutex_t PlatformMutex;
-typedef pthread_cond_t PlatformCondition;
+using PlatformThreadHandle = pthread_t;
+using PlatformMutex = pthread_mutex_t;
+using PlatformCondition = pthread_cond_t;
 #elif OS(WINDOWS)
+using ThreadIdentifier = uint32_t;
+using PlatformThreadHandle = HANDLE;
 struct PlatformMutex {
     CRITICAL_SECTION m_internalMutex;
     size_t m_recursionCount;
@@ -96,8 +101,7 @@ public:
     
     WTF_EXPORT_PRIVATE void wait(Mutex& mutex);
     // Returns true if the condition was signaled before absoluteTime, false if the absoluteTime was reached or is in the past.
-    // The absoluteTime is in seconds, starting on January 1, 1970. The time is assumed to use the same time zone as WTF::currentTime().
-    WTF_EXPORT_PRIVATE bool timedWait(Mutex&, double absoluteTime);
+    WTF_EXPORT_PRIVATE bool timedWait(Mutex&, WallTime absoluteTime);
     WTF_EXPORT_PRIVATE void signal();
     WTF_EXPORT_PRIVATE void broadcast();
     
@@ -106,9 +110,8 @@ private:
 };
 
 #if OS(WINDOWS)
-// The absoluteTime is in seconds, starting on January 1, 1970. The time is assumed to use the same time zone as WTF::currentTime().
 // Returns an interval in milliseconds suitable for passing to one of the Win32 wait functions (e.g., ::WaitForSingleObject).
-WTF_EXPORT_PRIVATE DWORD absoluteTimeToWaitTimeoutInterval(double absoluteTime);
+WTF_EXPORT_PRIVATE DWORD absoluteTimeToWaitTimeoutInterval(WallTime absoluteTime);
 #endif
 
 } // namespace WTF

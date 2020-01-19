@@ -24,11 +24,9 @@
 
 #pragma once
 
-#include "BasicShapes.h"
 #include "CSSPropertyNames.h"
 #include "ClipPathOperation.h"
 #include "CounterDirectives.h"
-#include "CursorData.h"
 #include "DataRef.h"
 #include "FillLayer.h"
 #include "LengthPoint.h"
@@ -94,8 +92,6 @@ public:
 
     bool hasOpacity() const { return opacity < 1; }
 
-    bool hasAnimationsOrTransitions() const { return animations || transitions; }
-
     float opacity;
 
     float aspectRatioDenominator;
@@ -106,6 +102,7 @@ public:
     Length perspectiveOriginY;
 
     LineClampValue lineClamp; // An Apple extension.
+    LinesClampValue linesClamp; // An Apple extension.
     
     IntSize initialLetter;
 
@@ -168,9 +165,6 @@ public:
 
     int order;
 
-    AtomicString flowThread;
-    AtomicString regionThread;
-
     StyleContentAlignmentData alignContent;
     StyleSelfAlignmentData alignItems;
     StyleSelfAlignmentData alignSelf;
@@ -182,12 +176,9 @@ public:
     unsigned touchAction : 1; // TouchAction
 #endif
 
-    unsigned regionFragment : 1; // RegionFragment
-
     unsigned pageSizeType : 2; // PageSizeType
     unsigned transformStyle3D : 1; // ETransformStyle3D
     unsigned backfaceVisibility : 1; // EBackfaceVisibility
-
 
     unsigned userDrag : 2; // EUserDrag
     unsigned textOverflow : 1; // Whether or not lines that spill out should be truncated with "..."
@@ -220,7 +211,10 @@ public:
 
     unsigned hasAttrContent : 1;
 
-    unsigned isPlaceholderStyle : 1;
+    unsigned isNotFinal : 1;
+
+    GapLength columnGap;
+    GapLength rowGap;
 
 private:
     StyleRareNonInheritedData();

@@ -25,6 +25,7 @@
 #include "RenderSVGPath.h"
 #include "RenderSVGResource.h"
 #include "SVGAnimatedPointList.h"
+#include "SVGDocumentExtensions.h"
 #include "SVGNames.h"
 #include "SVGParserUtilities.h"
 #include "SVGPoint.h"
@@ -38,11 +39,11 @@ const SVGPropertyInfo* SVGPolyElement::pointsPropertyInfo()
     static const SVGPropertyInfo* s_propertyInfo = nullptr;
     if (!s_propertyInfo) {
         s_propertyInfo = new SVGPropertyInfo(AnimatedPoints,
-                                             PropertyIsReadWrite,
-                                             SVGNames::pointsAttr,
-                                             SVGNames::pointsAttr.localName(),
-                                             &SVGPolyElement::synchronizePoints,
-                                             &SVGPolyElement::lookupOrCreatePointsWrapper);
+            PropertyIsReadWrite,
+            SVGNames::pointsAttr,
+            SVGNames::pointsAttr->localName(),
+            &SVGPolyElement::synchronizePoints,
+            &SVGPolyElement::lookupOrCreatePointsWrapper);
     }
     return s_propertyInfo;
 }

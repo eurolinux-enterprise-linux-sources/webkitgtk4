@@ -32,7 +32,6 @@
 #include <wtf/HashMap.h>
 #include <wtf/Vector.h>
 #include <wtf/text/AtomicStringHash.h>
-#include <wtf/text/CString.h>
 
 namespace WebCore {
 
@@ -88,7 +87,7 @@ private:
     template <typename SelectorQueryTrait> void executeCompiledSimpleSelectorChecker(const ContainerNode& searchRootNode, SelectorCompiler::QuerySelectorSimpleSelectorChecker, typename SelectorQueryTrait::OutputType&, const SelectorData&) const;
     template <typename SelectorQueryTrait> void executeCompiledSelectorCheckerWithCheckingContext(const ContainerNode& rootNode, const ContainerNode& searchRootNode, SelectorCompiler::QuerySelectorSelectorCheckerWithCheckingContext, typename SelectorQueryTrait::OutputType&, const SelectorData&) const;
     template <typename SelectorQueryTrait> void executeCompiledSingleMultiSelectorData(const ContainerNode& rootNode, typename SelectorQueryTrait::OutputType&) const;
-    static bool compileSelector(const SelectorData&, const ContainerNode& rootNode);
+    static bool compileSelector(const SelectorData&);
 #endif // ENABLE(CSS_SELECTOR_JIT)
 
     Vector<SelectorData> m_selectors;

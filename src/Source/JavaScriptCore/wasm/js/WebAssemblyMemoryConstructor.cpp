@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -41,7 +41,7 @@
 
 namespace JSC {
 
-const ClassInfo WebAssemblyMemoryConstructor::s_info = { "Function", &Base::s_info, &constructorTableWebAssemblyMemory, CREATE_METHOD_TABLE(WebAssemblyMemoryConstructor) };
+const ClassInfo WebAssemblyMemoryConstructor::s_info = { "Function", &Base::s_info, &constructorTableWebAssemblyMemory, nullptr, CREATE_METHOD_TABLE(WebAssemblyMemoryConstructor) };
 
 /* Source for WebAssemblyMemoryConstructor.lut.h
  @begin constructorTableWebAssemblyMemory
@@ -96,19 +96,26 @@ static EncodedJSValue JSC_HOST_CALL constructJSWebAssemblyMemory(ExecState* exec
         }
     }
 
-    bool failed;
-    Wasm::Memory memory(initialPageCount, maximumPageCount, failed);
-    if (failed)
+    auto* jsMemory = JSWebAssemblyMemory::create(exec, vm, exec->lexicalGlobalObject()->WebAssemblyMemoryStructure());
+    RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
+
+    RefPtr<Wasm::Memory> memory = Wasm::Memory::create(initialPageCount, maximumPageCount,
+        [&vm] (Wasm::Memory::NotifyPressure) { vm.heap.collectAsync(CollectionScope::Full); },
+        [&vm] (Wasm::Memory::SyncTryToReclaim) { vm.heap.collectSync(CollectionScope::Full); },
+        [&vm, jsMemory] (Wasm::Memory::GrowSuccess, Wasm::PageCount oldPageCount, Wasm::PageCount newPageCount) { jsMemory->growSuccessCallback(vm, oldPageCount, newPageCount); });
+    if (!memory)
         return JSValue::encode(throwException(exec, throwScope, createOutOfMemoryError(exec)));
 
-    return JSValue::encode(JSWebAssemblyMemory::create(vm, exec->lexicalGlobalObject()->WebAssemblyMemoryStructure(), WTFMove(memory)));
+    jsMemory->adopt(memory.releaseNonNull());
+    
+    return JSValue::encode(jsMemory);
 }
 
-static EncodedJSValue JSC_HOST_CALL callJSWebAssemblyMemory(ExecState* state)
+static EncodedJSValue JSC_HOST_CALL callJSWebAssemblyMemory(ExecState* exec)
 {
-    VM& vm = state->vm();
+    VM& vm = exec->vm();
     auto throwScope = DECLARE_THROW_SCOPE(vm);
-    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(state, throwScope, "WebAssembly.Memory"));
+    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(exec, throwScope, "WebAssembly.Memory"));
 }
 
 WebAssemblyMemoryConstructor* WebAssemblyMemoryConstructor::create(VM& vm, Structure* structure, WebAssemblyMemoryPrototype* thisPrototype)
@@ -120,38 +127,19 @@ WebAssemblyMemoryConstructor* WebAssemblyMemoryConstructor::create(VM& vm, Struc
 
 Structure* WebAssemblyMemoryConstructor::createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
 {
-    return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
+    return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info());
 }
 
 void WebAssemblyMemoryConstructor::finishCreation(VM& vm, WebAssemblyMemoryPrototype* prototype)
 {
     Base::finishCreation(vm, ASCIILiteral("Memory"));
-    putDirectWithoutTransition(vm, vm.propertyNames->prototype, prototype, DontEnum | DontDelete | ReadOnly);
-    putDirectWithoutTransition(vm, vm.propertyNames->length, jsNumber(1), ReadOnly | DontEnum | DontDelete);
+    putDirectWithoutTransition(vm, vm.propertyNames->prototype, prototype, PropertyAttribute::DontEnum | PropertyAttribute::DontDelete | PropertyAttribute::ReadOnly);
+    putDirectWithoutTransition(vm, vm.propertyNames->length, jsNumber(1), PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum | PropertyAttribute::DontDelete);
 }
 
 WebAssemblyMemoryConstructor::WebAssemblyMemoryConstructor(VM& vm, Structure* structure)
-    : Base(vm, structure)
+    : Base(vm, structure, callJSWebAssemblyMemory, constructJSWebAssemblyMemory)
 {
-}
-
-ConstructType WebAssemblyMemoryConstructor::getConstructData(JSCell*, ConstructData& constructData)
-{
-    constructData.native.function = constructJSWebAssemblyMemory;
-    return ConstructType::Host;
-}
-
-CallType WebAssemblyMemoryConstructor::getCallData(JSCell*, CallData& callData)
-{
-    callData.native.function = callJSWebAssemblyMemory;
-    return CallType::Host;
-}
-
-void WebAssemblyMemoryConstructor::visitChildren(JSCell* cell, SlotVisitor& visitor)
-{
-    auto* thisObject = jsCast<WebAssemblyMemoryConstructor*>(cell);
-    ASSERT_GC_OBJECT_INHERITS(thisObject, info());
-    Base::visitChildren(thisObject, visitor);
 }
 
 } // namespace JSC

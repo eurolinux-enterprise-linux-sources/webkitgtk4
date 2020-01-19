@@ -38,6 +38,7 @@ enum ImageSizeChangeType {
 };
 
 class RenderImage : public RenderReplaced {
+    WTF_MAKE_ISO_ALLOCATED(RenderImage);
 public:
     RenderImage(Element&, RenderStyle&&, StyleImage* = nullptr, const float = 1.0f);
     RenderImage(Document&, RenderStyle&&, StyleImage* = nullptr);
@@ -69,6 +70,11 @@ public:
     float imageDevicePixelRatio() const { return m_imageDevicePixelRatio; }
 
     void setHasShadowControls(bool hasShadowControls) { m_hasShadowControls = hasShadowControls; }
+    
+    bool isShowingMissingOrImageError() const;
+    bool isShowingAltText() const;
+
+    bool hasNonBitmapImage() const;
 
 protected:
     void willBeDestroyed() override;
@@ -83,7 +89,7 @@ protected:
 
     void imageChanged(WrappedImagePtr, const IntRect* = nullptr) override;
 
-    void paintIntoRect(GraphicsContext&, const FloatRect&);
+    ImageDrawResult paintIntoRect(PaintInfo&, const FloatRect&);
     void paint(PaintInfo&, const LayoutPoint&) final;
     void layout() override;
 

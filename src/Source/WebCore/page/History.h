@@ -29,6 +29,7 @@
 #include "ExceptionOr.h"
 #include "ScriptWrappable.h"
 #include "SerializedScriptValue.h"
+#include <wtf/WallTime.h>
 
 namespace WebCore {
 
@@ -41,6 +42,15 @@ public:
     static Ref<History> create(Frame& frame) { return adoptRef(*new History(frame)); }
 
     unsigned length() const;
+    
+    enum class ScrollRestoration {
+        Auto,
+        Manual
+    };
+
+    ExceptionOr<ScrollRestoration> scrollRestoration() const;
+    ExceptionOr<void> setScrollRestoration(ScrollRestoration);
+
     SerializedScriptValue* state();
     void back();
     void forward();
@@ -66,7 +76,7 @@ private:
     RefPtr<SerializedScriptValue> m_lastStateObjectRequested;
 
     unsigned m_currentStateObjectTimeSpanObjectsAdded { 0 };
-    double m_currentStateObjectTimeSpanStart { 0.0 };
+    WallTime m_currentStateObjectTimeSpanStart;
 
     // For the main frame's History object to keep track of all state object usage.
     uint64_t m_totalStateObjectUsage { 0 };

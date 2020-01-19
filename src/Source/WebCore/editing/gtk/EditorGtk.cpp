@@ -45,6 +45,7 @@
 #include "SelectionData.h"
 #include "XLinkNames.h"
 #include "markup.h"
+#include <cairo.h>
 
 namespace WebCore {
 
@@ -65,7 +66,9 @@ static RefPtr<DocumentFragment> createFragmentFromPasteboardData(Pasteboard& pas
         }, &buffer);
         if (status == CAIRO_STATUS_SUCCESS) {
             auto blob = Blob::create(WTFMove(buffer), "image/png");
-            return frame.editor().createFragmentForImageAndURL(DOMURL::createObjectURL(*frame.document(), blob));
+            if (!frame.document())
+                return nullptr;
+            return createFragmentForImageAndURL(*frame.document(), DOMURL::createObjectURL(*frame.document(), blob));
         }
     }
 
@@ -91,7 +94,7 @@ void Editor::pasteWithPasteboard(Pasteboard* pasteboard, bool allowPlainText, Ma
 
     bool chosePlainText;
     RefPtr<DocumentFragment> fragment = createFragmentFromPasteboardData(*pasteboard, m_frame, *range, allowPlainText, chosePlainText);
-    if (fragment && shouldInsertFragment(fragment, range, EditorInsertAction::Pasted))
+    if (fragment && shouldInsertFragment(*fragment, range.get(), EditorInsertAction::Pasted))
         pasteAsFragment(fragment.releaseNonNull(), canSmartReplaceWithPasteboard(*pasteboard), chosePlainText, mailBlockquoteHandling);
 }
 
@@ -103,7 +106,7 @@ static const AtomicString& elementURL(Element& element)
         return element.attributeWithoutSynchronization(XLinkNames::hrefAttr);
     if (is<HTMLEmbedElement>(element) || is<HTMLObjectElement>(element))
         return element.imageSourceURL();
-    return nullAtom;
+    return nullAtom();
 }
 
 static bool getImageForElement(Element& element, RefPtr<Image>& image)

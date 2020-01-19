@@ -39,8 +39,8 @@
 #include "RenderTheme.h"
 #include "TextTrack.h"
 #include "TextTrackList.h"
-#include "UUID.h"
-#include <runtime/JSCJSValueInlines.h>
+#include <JavaScriptCore/JSCJSValueInlines.h>
+#include <wtf/UUID.h>
 
 namespace WebCore {
 
@@ -80,9 +80,7 @@ MediaControlsHost::MediaControlsHost(HTMLMediaElement* mediaElement)
     ASSERT(mediaElement);
 }
 
-MediaControlsHost::~MediaControlsHost()
-{
-}
+MediaControlsHost::~MediaControlsHost() = default;
 
 Vector<RefPtr<TextTrack>> MediaControlsHost::sortedTrackListForMenu(TextTrackList& trackList)
 {
@@ -130,7 +128,7 @@ AtomicString MediaControlsHost::captionDisplayMode() const
 {
     Page* page = m_mediaElement->document().page();
     if (!page)
-        return emptyAtom;
+        return emptyAtom();
 
     switch (page->group().captionPreferences().captionDisplayMode()) {
     case CaptionUserPreferences::Automatic:
@@ -143,7 +141,7 @@ AtomicString MediaControlsHost::captionDisplayMode() const
         return manualKeyword();
     default:
         ASSERT_NOT_REACHED();
-        return emptyAtom;
+        return emptyAtom();
     }
 }
 
@@ -215,10 +213,15 @@ bool MediaControlsHost::userGestureRequired() const
     return !m_mediaElement->mediaSession().playbackPermitted(*m_mediaElement);
 }
 
+bool MediaControlsHost::shouldForceControlsDisplay() const
+{
+    return m_mediaElement->shouldForceControlsDisplay();
+}
+
 String MediaControlsHost::externalDeviceDisplayName() const
 {
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
-    MediaPlayer* player = m_mediaElement->player();
+    auto player = m_mediaElement->player();
     if (!player) {
         LOG(Media, "MediaControlsHost::externalDeviceDisplayName - returning \"\" because player is NULL");
         return emptyString();
@@ -238,7 +241,7 @@ auto MediaControlsHost::externalDeviceType() const -> DeviceType
 #if !ENABLE(WIRELESS_PLAYBACK_TARGET)
     return DeviceType::None;
 #else
-    MediaPlayer* player = m_mediaElement->player();
+    auto player = m_mediaElement->player();
     if (!player) {
         LOG(Media, "MediaControlsHost::externalDeviceType - returning \"none\" because player is NULL");
         return DeviceType::None;
@@ -275,18 +278,18 @@ String MediaControlsHost::generateUUID() const
 
 String MediaControlsHost::shadowRootCSSText() const
 {
-    Page* page = m_mediaElement->document().page();
-    if (!page)
-        return emptyString();
-    return RenderTheme::themeForPage(page)->modernMediaControlsStyleSheet();
+    return RenderTheme::singleton().modernMediaControlsStyleSheet();
 }
 
-String MediaControlsHost::base64StringForIconAndPlatform(const String& iconName, const String& platform) const
+String MediaControlsHost::base64StringForIconNameAndType(const String& iconName, const String& iconType) const
 {
-    Page* page = m_mediaElement->document().page();
-    if (!page)
-        return emptyString();
-    return RenderTheme::themeForPage(page)->mediaControlsBase64StringForIconAndPlatform(iconName, platform);
+
+    return RenderTheme::singleton().mediaControlsBase64StringForIconNameAndType(iconName, iconType);
+}
+
+String MediaControlsHost::formattedStringForDuration(double durationInSeconds) const
+{
+    return RenderTheme::singleton().mediaControlsFormattedStringForDuration(durationInSeconds);
 }
 
 }

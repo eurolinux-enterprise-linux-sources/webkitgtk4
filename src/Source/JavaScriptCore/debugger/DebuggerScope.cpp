@@ -34,7 +34,7 @@ namespace JSC {
 
 STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(DebuggerScope);
 
-const ClassInfo DebuggerScope::s_info = { "DebuggerScope", &Base::s_info, 0, CREATE_METHOD_TABLE(DebuggerScope) };
+const ClassInfo DebuggerScope::s_info = { "DebuggerScope", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(DebuggerScope) };
 
 DebuggerScope* DebuggerScope::create(VM& vm, JSScope* scope)
 {
@@ -100,7 +100,7 @@ bool DebuggerScope::getOwnPropertySlot(JSObject* object, ExecState* exec, Proper
         // Currently, we just lie to the inspector and claim that this property is undefined.
         // This is not ideal and we should fix it.
         // https://bugs.webkit.org/show_bug.cgi?id=144977
-        slot.setValue(slot.slotBase(), DontEnum, jsUndefined());
+        slot.setValue(slot.slotBase(), static_cast<unsigned>(PropertyAttribute::DontEnum), jsUndefined());
         return true;
     }
     return result;

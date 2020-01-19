@@ -33,20 +33,22 @@
 #include "FTLJITCode.h"
 #include "FTLLazySlowPath.h"
 #include "InlineCallFrame.h"
+#include "Interpreter.h"
 #include "JSAsyncFunction.h"
+#include "JSAsyncGeneratorFunction.h"
 #include "JSCInlines.h"
 #include "JSFixedArray.h"
 #include "JSGeneratorFunction.h"
 #include "JSLexicalEnvironment.h"
+#include "RegExpObject.h"
 
 namespace JSC { namespace FTL {
-
-using namespace JSC::DFG;
 
 extern "C" void JIT_OPERATION operationPopulateObjectInOSR(
     ExecState* exec, ExitTimeObjectMaterialization* materialization,
     EncodedJSValue* encodedValue, EncodedJSValue* values)
 {
+    using namespace DFG;
     VM& vm = exec->vm();
     CodeBlock* codeBlock = exec->codeBlock();
 
@@ -84,11 +86,13 @@ extern "C" void JIT_OPERATION operationPopulateObjectInOSR(
     case PhantomNewFunction:
     case PhantomNewGeneratorFunction:
     case PhantomNewAsyncFunction:
+    case PhantomNewAsyncGeneratorFunction:
     case PhantomDirectArguments:
     case PhantomClonedArguments:
     case PhantomCreateRest:
     case PhantomSpread:
     case PhantomNewArrayWithSpread:
+    case PhantomNewArrayBuffer:
         // Those are completely handled by operationMaterializeObjectInOSR
         break;
 
@@ -101,12 +105,25 @@ extern "C" void JIT_OPERATION operationPopulateObjectInOSR(
             if (property.location().kind() != ClosureVarPLoc)
                 continue;
 
-            activation->variableAt(ScopeOffset(property.location().info())).set(exec->vm(), activation, JSValue::decode(values[i]));
+            activation->variableAt(ScopeOffset(property.location().info())).set(vm, activation, JSValue::decode(values[i]));
         }
 
         break;
     }
 
+    case PhantomNewRegexp: {
+        RegExpObject* regExpObject = jsCast<RegExpObject*>(JSValue::decode(*encodedValue));
+
+        for (unsigned i = materialization->properties().size(); i--;) {
+            const ExitPropertyValue& property = materialization->properties()[i];
+            if (property.location().kind() != RegExpObjectLastIndexPLoc)
+                continue;
+
+            regExpObject->setLastIndex(exec, JSValue::decode(values[i]), false /* shouldThrow */);
+            break;
+        }
+        break;
+    }
 
     default:
         RELEASE_ASSERT_NOT_REACHED();
@@ -118,6 +135,7 @@ extern "C" void JIT_OPERATION operationPopulateObjectInOSR(
 extern "C" JSCell* JIT_OPERATION operationMaterializeObjectInOSR(
     ExecState* exec, ExitTimeObjectMaterialization* materialization, EncodedJSValue* values)
 {
+    using namespace DFG;
     VM& vm = exec->vm();
 
     // We cannot GC. We've got pointers in evil places.
@@ -158,6 +176,7 @@ extern "C" JSCell* JIT_OPERATION operationMaterializeObjectInOSR(
 
     case PhantomNewFunction:
     case PhantomNewGeneratorFunction:
+    case PhantomNewAsyncGeneratorFunction:
     case PhantomNewAsyncFunction: {
         // Figure out what the executable and activation are
         FunctionExecutable* executable = nullptr;
@@ -179,6 +198,8 @@ extern "C" JSCell* JIT_OPERATION operationMaterializeObjectInOSR(
             return JSFunction::createWithInvalidatedReallocationWatchpoint(vm, executable, activation);
         else if (materialization->type() == PhantomNewGeneratorFunction)
             return JSGeneratorFunction::createWithInvalidatedReallocationWatchpoint(vm, executable, activation);    
+        else if (materialization->type() == PhantomNewAsyncGeneratorFunction)
+            return JSAsyncGeneratorFunction::createWithInvalidatedReallocationWatchpoint(vm, executable, activation);
         ASSERT(materialization->type() == PhantomNewAsyncFunction);
         return JSAsyncFunction::createWithInvalidatedReallocationWatchpoint(vm, executable, activation);
     }
@@ -220,7 +241,7 @@ extern "C" JSCell* JIT_OPERATION operationMaterializeObjectInOSR(
                 continue;
 
             result->variableAt(ScopeOffset(property.location().info())).set(
-                exec->vm(), result, jsNumber(29834));
+                vm, result, jsNumber(29834));
         }
 
         if (validationEnabled()) {
@@ -288,7 +309,7 @@ extern "C" JSCell* JIT_OPERATION operationMaterializeObjectInOSR(
                 break;
             }
         } else
-            argumentCount = materialization->origin().inlineCallFrame->arguments.size();
+            argumentCount = materialization->origin().inlineCallFrame->argumentCountIncludingThis;
         RELEASE_ASSERT(argumentCount);
         
         JSFunction* callee = nullptr;
@@ -352,7 +373,7 @@ extern "C" JSCell* JIT_OPERATION operationMaterializeObjectInOSR(
                 unsigned index = property.location().info();
                 if (index >= length)
                     continue;
-                result->initializeIndex(vm, index, JSValue::decode(values[i]));
+                result->putDirectIndex(exec, index, JSValue::decode(values[i]));
             }
             
             return result;
@@ -364,9 +385,9 @@ extern "C" JSCell* JIT_OPERATION operationMaterializeObjectInOSR(
             ASSERT(argumentCount > 0);
             unsigned arraySize = (argumentCount - 1) > numberOfArgumentsToSkip ? argumentCount - 1 - numberOfArgumentsToSkip : 0;
 
-            // FIXME: we should throw an out of memory error here if tryCreateForInitializationPrivate() fails.
+            // FIXME: we should throw an out of memory error here if tryCreate() fails.
             // https://bugs.webkit.org/show_bug.cgi?id=169784
-            JSArray* array = JSArray::tryCreateForInitializationPrivate(vm, structure, arraySize);
+            JSArray* array = JSArray::tryCreate(vm, structure, arraySize);
             RELEASE_ASSERT(array);
 
             for (unsigned i = materialization->properties().size(); i--;) {
@@ -380,7 +401,7 @@ extern "C" JSCell* JIT_OPERATION operationMaterializeObjectInOSR(
                 unsigned arrayIndex = argIndex - numberOfArgumentsToSkip;
                 if (arrayIndex >= arraySize)
                     continue;
-                array->initializeIndex(vm, arrayIndex, JSValue::decode(values[i]));
+                array->putDirectIndex(exec, arrayIndex, JSValue::decode(values[i]));
             }
 
 #if !ASSERT_DISABLED
@@ -432,7 +453,27 @@ extern "C" JSCell* JIT_OPERATION operationMaterializeObjectInOSR(
         // that we only support PhantomSpread over CreateRest, which is an array we create.
         // Any attempts to put a getter on any indices on the rest array will escape the array.
         JSFixedArray* fixedArray = JSFixedArray::createFromArray(exec, vm, array);
+        RELEASE_ASSERT(fixedArray);
         return fixedArray;
+    }
+
+    case PhantomNewArrayBuffer: {
+        JSFixedArray* array = nullptr;
+        for (unsigned i = materialization->properties().size(); i--;) {
+            const ExitPropertyValue& property = materialization->properties()[i];
+            if (property.location().kind() == NewArrayBufferPLoc) {
+                array = jsCast<JSFixedArray*>(JSValue::decode(values[i]));
+                break;
+            }
+        }
+        RELEASE_ASSERT(array);
+
+        // For now, we use array allocation profile in the actual CodeBlock. It is OK since current NewArrayBuffer
+        // and PhantomNewArrayBuffer are always bound to a specific op_new_array_buffer.
+        CodeBlock* codeBlock = baselineCodeBlockForOriginAndBaselineCodeBlock(materialization->origin(), exec->codeBlock());
+        Instruction* currentInstruction = &codeBlock->instructions()[materialization->origin().bytecodeIndex];
+        RELEASE_ASSERT(Interpreter::getOpcodeID(currentInstruction[0].u.opcode) == op_new_array_buffer);
+        return constructArray(exec, currentInstruction[3].u.arrayAllocationProfile, array->values(), array->length());
     }
 
     case PhantomNewArrayWithSpread: {
@@ -455,10 +496,10 @@ extern "C" JSCell* JIT_OPERATION operationMaterializeObjectInOSR(
             }
         }
 
-        // FIXME: we should throw an out of memory error here if checkedArraySize has hasOverflowed() or tryCreateForInitializationPrivate() fails.
+        // FIXME: we should throw an out of memory error here if checkedArraySize has hasOverflowed() or tryCreate() fails.
         // https://bugs.webkit.org/show_bug.cgi?id=169784
         unsigned arraySize = checkedArraySize.unsafeGet(); // Crashes if overflowed.
-        JSArray* result = JSArray::tryCreateForInitializationPrivate(vm, structure, arraySize);
+        JSArray* result = JSArray::tryCreate(vm, structure, arraySize);
         RELEASE_ASSERT(result);
 
 #if !ASSERT_DISABLED
@@ -493,12 +534,12 @@ extern "C" JSCell* JIT_OPERATION operationMaterializeObjectInOSR(
             if (JSFixedArray* fixedArray = jsDynamicCast<JSFixedArray*>(vm, value)) {
                 for (unsigned i = 0; i < fixedArray->size(); i++) {
                     ASSERT(fixedArray->get(i));
-                    result->initializeIndex(vm, arrayIndex, fixedArray->get(i));
+                    result->putDirectIndex(exec, arrayIndex, fixedArray->get(i));
                     ++arrayIndex;
                 }
             } else {
                 // We are not spreading.
-                result->initializeIndex(vm, arrayIndex, value);
+                result->putDirectIndex(exec, arrayIndex, value);
                 ++arrayIndex;
             }
         }
@@ -506,7 +547,21 @@ extern "C" JSCell* JIT_OPERATION operationMaterializeObjectInOSR(
         return result;
     }
 
-        
+    case PhantomNewRegexp: {
+        RegExp* regExp = nullptr;
+        for (unsigned i = materialization->properties().size(); i--;) {
+            const ExitPropertyValue& property = materialization->properties()[i];
+            if (property.location() == PromotedLocationDescriptor(RegExpObjectRegExpPLoc)) {
+                RELEASE_ASSERT(JSValue::decode(values[i]).asCell()->inherits(vm, RegExp::info()));
+                regExp = jsCast<RegExp*>(JSValue::decode(values[i]));
+            }
+        }
+        RELEASE_ASSERT(regExp);
+        CodeBlock* codeBlock = baselineCodeBlockForOriginAndBaselineCodeBlock(materialization->origin(), exec->codeBlock());
+        Structure* structure = codeBlock->globalObject()->regExpStructure();
+        return RegExpObject::create(vm, structure, regExp);
+    }
+
     default:
         RELEASE_ASSERT_NOT_REACHED();
         return nullptr;

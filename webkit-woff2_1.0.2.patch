@@ -1,0 +1,111 @@
+From aacbb7501a1c9b16a73211a8a67ff5b028e92988 Mon Sep 17 00:00:00 2001
+From: "mcatanzaro@igalia.com"
+ <mcatanzaro@igalia.com@268f45cc-cd09-0410-ab3c-d52691b4dbfc>
+Date: Tue, 14 Nov 2017 00:42:20 +0000
+Subject: [PATCH] [GTK] Require woff2 1.0.2 and drop direct brotli dependency
+ https://bugs.webkit.org/show_bug.cgi?id=179630
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Reviewed by Frédéric Wang.
+
+.:
+
+* Source/cmake/FindBrotliDec.cmake: Removed.
+* Source/cmake/OptionsGTK.cmake:
+
+Tools:
+
+* gtk/jhbuild.modules:
+
+
+git-svn-id: http://svn.webkit.org/repository/webkit/trunk@224793 268f45cc-cd09-0410-ab3c-d52691b4dbfc
+---
+ ChangeLog                        | 10 ++++++++
+ Source/cmake/FindBrotliDec.cmake | 53 ----------------------------------------
+ Source/cmake/OptionsGTK.cmake    |  6 +----
+ Tools/ChangeLog                  |  9 +++++++
+ Tools/gtk/jhbuild.modules        |  2 +-
+ 5 files changed, 21 insertions(+), 59 deletions(-)
+ delete mode 100644 Source/cmake/FindBrotliDec.cmake
+
+diff --git a/Source/cmake/FindBrotliDec.cmake b/Source/cmake/FindBrotliDec.cmake
+deleted file mode 100644
+index 3a8cf90357f..00000000000
+--- a/Source/cmake/FindBrotliDec.cmake
++++ /dev/null
+@@ -1,53 +0,0 @@
+-# - Try to find BrotliDec.
+-# Once done, this will define
+-#
+-#  BROTLIDEC_FOUND - system has BrotliDec.
+-#  BROTLIDEC_INCLUDE_DIRS - the BrotliDec include directories
+-#  BROTLIDEC_LIBRARIES - link these to use BrotliDec.
+-#
+-# Copyright (C) 2017 Igalia S.L.
+-#
+-# Redistribution and use in source and binary forms, with or without
+-# modification, are permitted provided that the following conditions
+-# are met:
+-# 1.  Redistributions of source code must retain the above copyright
+-#     notice, this list of conditions and the following disclaimer.
+-# 2.  Redistributions in binary form must reproduce the above copyright
+-#     notice, this list of conditions and the following disclaimer in the
+-#     documentation and/or other materials provided with the distribution.
+-#
+-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER AND ITS CONTRIBUTORS ``AS
+-# IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+-# THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+-# PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR ITS
+-# CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+-# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-
+-find_package(PkgConfig)
+-pkg_check_modules(PC_BROTLIDEC libbrotlidec)
+-
+-find_path(BROTLIDEC_INCLUDE_DIRS
+-    NAMES brotli/decode.h
+-    HINTS ${PC_BROTLIDEC_INCLUDEDIR}
+-)
+-
+-find_library(BROTLIDEC_LIBRARIES
+-    NAMES brotlidec
+-    HINTS ${PC_BROTLIDEC_LIBDIR}
+-)
+-
+-include(FindPackageHandleStandardArgs)
+-find_package_handle_standard_args(BrotliDec
+-    REQUIRED_VARS BROTLIDEC_INCLUDE_DIRS BROTLIDEC_LIBRARIES
+-    FOUND_VAR BROTLIDEC_FOUND
+-    VERSION_VAR PC_BROTLIDEC_VERSION)
+-
+-mark_as_advanced(
+-    BROTLIDEC_INCLUDE_DIRS
+-    BROTLIDEC_LIBRARIES
+-)
+diff --git a/Source/cmake/OptionsGTK.cmake b/Source/cmake/OptionsGTK.cmake
+index ba7e134c7cc..39c3a9be47e 100644
+--- a/Source/cmake/OptionsGTK.cmake
++++ b/Source/cmake/OptionsGTK.cmake
+@@ -365,11 +365,7 @@ if (USE_UPOWER)
+ endif ()
+ 
+ if (USE_WOFF2)
+-    find_package(BrotliDec 1.0.1)
+-    if (NOT BROTLIDEC_FOUND)
+-       message(FATAL_ERROR "libbrotlidec is needed for USE_WOFF2.")
+-    endif ()
+-    find_package(WOFF2Dec 1.0.1)
++    find_package(WOFF2Dec 1.0.2)
+     if (NOT WOFF2DEC_FOUND)
+        message(FATAL_ERROR "libwoff2dec is needed for USE_WOFF2.")
+     endif ()
+-- 
+2.16.2
+

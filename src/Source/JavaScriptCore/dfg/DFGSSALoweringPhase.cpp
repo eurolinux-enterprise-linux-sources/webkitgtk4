@@ -68,10 +68,47 @@ private:
     void handleNode()
     {
         switch (m_node->op()) {
-        case GetByVal:
+        case AtomicsAdd:
+        case AtomicsAnd:
+        case AtomicsCompareExchange:
+        case AtomicsExchange:
+        case AtomicsLoad:
+        case AtomicsOr:
+        case AtomicsStore:
+        case AtomicsSub:
+        case AtomicsXor:
         case HasIndexedProperty:
-            lowerBoundsCheck(m_node->child1(), m_node->child2(), m_node->child3());
+            lowerBoundsCheck(m_graph.child(m_node, 0), m_graph.child(m_node, 1), m_graph.child(m_node, 2));
             break;
+
+        case GetByVal: {
+            lowerBoundsCheck(m_graph.varArgChild(m_node, 0), m_graph.varArgChild(m_node, 1), m_graph.varArgChild(m_node, 2));
+            auto insertGetMask = [&] () {
+                Node* mask = m_insertionSet.insertNode(
+                    m_nodeIndex, SpecInt32Only, GetArrayMask,
+                    m_node->origin, Edge(m_graph.varArgChild(m_node, 0).node(), ObjectUse));
+                m_graph.varArgChild(m_node, 3) = Edge(mask, Int32Use);
+            };
+            auto arrayMode = m_node->arrayMode();
+            switch (arrayMode.type()) {
+            case Array::Int32:
+            case Array::Contiguous:
+            case Array::Double:
+            case Array::ArrayStorage:
+            case Array::SlowPutArrayStorage:
+                // FIXME: Also support this in the DFG:
+                // https://bugs.webkit.org/show_bug.cgi?id=182711
+                insertGetMask();
+                break;
+            default:
+                // FIXME: Pass in GetArrayLength on GetByVal's over Scoped/Direct Arguments.
+                // https://bugs.webkit.org/show_bug.cgi?id=182714
+                if (arrayMode.isSomeTypedArrayView())
+                    insertGetMask();
+                break;
+            }
+            break;
+        }
             
         case PutByVal:
         case PutByValDirect: {
@@ -105,8 +142,18 @@ private:
         if (!m_node->arrayMode().lengthNeedsStorage())
             storage = Edge();
         
+        NodeType op = GetArrayLength;
+        switch (m_node->arrayMode().type()) {
+        case Array::ArrayStorage:
+        case Array::SlowPutArrayStorage:
+            op = GetVectorLength;
+            break;
+        default:
+            break;
+        }
+
         Node* length = m_insertionSet.insertNode(
-            m_nodeIndex, SpecInt32Only, GetArrayLength, m_node->origin,
+            m_nodeIndex, SpecInt32Only, op, m_node->origin,
             OpInfo(m_node->arrayMode().asWord()), base, storage);
         m_insertionSet.insertNode(
             m_nodeIndex, SpecInt32Only, CheckInBounds, m_node->origin,

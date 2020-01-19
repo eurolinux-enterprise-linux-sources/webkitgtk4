@@ -33,17 +33,17 @@
 #include "RenderText.h"
 #include "RenderTheme.h"
 #include "ShadowRoot.h"
+#include "StringTruncator.h"
 #include "TextRun.h"
 #include "VisiblePosition.h"
 #include <math.h>
-
-#if PLATFORM(IOS)
-#include "StringTruncator.h"
-#endif
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
 using namespace HTMLNames;
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderFileUploadControl);
 
 const int afterButtonSpacing = 4;
 #if !PLATFORM(IOS)
@@ -64,9 +64,7 @@ RenderFileUploadControl::RenderFileUploadControl(HTMLInputElement& input, Render
 {
 }
 
-RenderFileUploadControl::~RenderFileUploadControl()
-{
-}
+RenderFileUploadControl::~RenderFileUploadControl() = default;
 
 HTMLInputElement& RenderFileUploadControl::inputElement() const
 {
@@ -244,7 +242,7 @@ void RenderFileUploadControl::computePreferredLogicalWidths()
     setPreferredLogicalWidthsDirty(false);
 }
 
-VisiblePosition RenderFileUploadControl::positionForPoint(const LayoutPoint&, const RenderRegion*)
+VisiblePosition RenderFileUploadControl::positionForPoint(const LayoutPoint&, const RenderFragmentContainer*)
 {
     return VisiblePosition();
 }
@@ -266,12 +264,11 @@ String RenderFileUploadControl::buttonValue()
 
 String RenderFileUploadControl::fileTextValue() const
 {
+    auto& input = inputElement();
     ASSERT(inputElement().files());
-#if PLATFORM(IOS)
-    if (inputElement().files()->length())
-        return StringTruncator::rightTruncate(inputElement().displayString(), maxFilenameWidth(), style().fontCascade());
-#endif
-    return theme().fileListNameForWidth(inputElement().files(), style().fontCascade(), maxFilenameWidth(), inputElement().multiple());
+    if (input.files()->length() && !input.displayString().isEmpty())
+        return StringTruncator::rightTruncate(input.displayString(), maxFilenameWidth(), style().fontCascade());
+    return theme().fileListNameForWidth(input.files(), style().fontCascade(), maxFilenameWidth(), input.multiple());
 }
     
 } // namespace WebCore

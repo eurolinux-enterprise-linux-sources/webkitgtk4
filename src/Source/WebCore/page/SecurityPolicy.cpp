@@ -45,8 +45,15 @@ static SecurityPolicy::LocalLoadPolicy localLoadPolicy = SecurityPolicy::AllowLo
 typedef Vector<OriginAccessEntry> OriginAccessWhiteList;
 typedef HashMap<String, std::unique_ptr<OriginAccessWhiteList>> OriginAccessMap;
 
+static Lock& originAccessMapLock()
+{
+    static NeverDestroyed<Lock> lock;
+    return lock;
+}
+
 static OriginAccessMap& originAccessMap()
 {
+    ASSERT(originAccessMapLock().isHeld());
     static NeverDestroyed<OriginAccessMap> originAccessMap;
     return originAccessMap;
 }
@@ -67,6 +74,16 @@ bool SecurityPolicy::shouldHideReferrer(const URL& url, const String& referrer)
     return !URLIsSecureURL;
 }
 
+static String referrerToOriginString(const String& referrer)
+{
+    String originString = SecurityOrigin::createFromString(referrer)->toString();
+    if (originString == "null")
+        return String();
+    // A security origin is not a canonical URL as it lacks a path. Add /
+    // to turn it into a canonical URL we can use as referrer.
+    return originString + "/";
+}
+
 String SecurityPolicy::generateReferrerHeader(ReferrerPolicy referrerPolicy, const URL& url, const String& referrer)
 {
     ASSERT(referrer == URL(URL(), referrer).strippedForUseAsReferrer());
@@ -78,20 +95,42 @@ String SecurityPolicy::generateReferrerHeader(ReferrerPolicy referrerPolicy, con
         return String();
 
     switch (referrerPolicy) {
-    case ReferrerPolicy::Never:
-        return String();
-    case ReferrerPolicy::Always:
-        return referrer;
-    case ReferrerPolicy::Origin: {
-        String origin = SecurityOrigin::createFromString(referrer)->toString();
-        if (origin == "null")
-            return String();
-        // A security origin is not a canonical URL as it lacks a path. Add /
-        // to turn it into a canonical URL we can use as referrer.
-        return origin + "/";
-    }
-    case ReferrerPolicy::Default:
+    case ReferrerPolicy::EmptyString:
+        ASSERT_NOT_REACHED();
         break;
+    case ReferrerPolicy::NoReferrer:
+        return String();
+    case ReferrerPolicy::NoReferrerWhenDowngrade:
+        break;
+    case ReferrerPolicy::SameOrigin: {
+        auto origin = SecurityOrigin::createFromString(referrer);
+        if (!origin->canRequest(url))
+            return String();
+        break;
+    }
+    case ReferrerPolicy::Origin:
+        return referrerToOriginString(referrer);
+    case ReferrerPolicy::StrictOrigin:
+        if (shouldHideReferrer(url, referrer))
+            return String();
+        return referrerToOriginString(referrer);
+    case ReferrerPolicy::OriginWhenCrossOrigin: {
+        auto origin = SecurityOrigin::createFromString(referrer);
+        if (!origin->canRequest(url))
+            return referrerToOriginString(referrer);
+        break;
+    }
+    case ReferrerPolicy::StrictOriginWhenCrossOrigin: {
+        auto origin = SecurityOrigin::createFromString(referrer);
+        if (!origin->canRequest(url)) {
+            if (shouldHideReferrer(url, referrer))
+                return String();
+            return referrerToOriginString(referrer);
+        }
+        break;
+    }
+    case ReferrerPolicy::UnsafeUrl:
+        return referrer;
     }
 
     return shouldHideReferrer(url, referrer) ? String() : referrer;
@@ -114,6 +153,7 @@ bool SecurityPolicy::allowSubstituteDataAccessToLocal()
 
 bool SecurityPolicy::isAccessWhiteListed(const SecurityOrigin* activeOrigin, const SecurityOrigin* targetOrigin)
 {
+    Locker<Lock> locker(originAccessMapLock());
     if (OriginAccessWhiteList* list = originAccessMap().get(activeOrigin->toString())) {
         for (auto& entry : *list) {
             if (entry.matchesOrigin(*targetOrigin))
@@ -131,12 +171,13 @@ bool SecurityPolicy::isAccessToURLWhiteListed(const SecurityOrigin* activeOrigin
 
 void SecurityPolicy::addOriginAccessWhitelistEntry(const SecurityOrigin& sourceOrigin, const String& destinationProtocol, const String& destinationDomain, bool allowDestinationSubdomains)
 {
-    ASSERT(isMainThread());
     ASSERT(!sourceOrigin.isUnique());
     if (sourceOrigin.isUnique())
         return;
 
     String sourceString = sourceOrigin.toString();
+
+    Locker<Lock> locker(originAccessMapLock());
     OriginAccessMap::AddResult result = originAccessMap().add(sourceString, nullptr);
     if (result.isNewEntry)
         result.iterator->value = std::make_unique<OriginAccessWhiteList>();
@@ -147,12 +188,13 @@ void SecurityPolicy::addOriginAccessWhitelistEntry(const SecurityOrigin& sourceO
 
 void SecurityPolicy::removeOriginAccessWhitelistEntry(const SecurityOrigin& sourceOrigin, const String& destinationProtocol, const String& destinationDomain, bool allowDestinationSubdomains)
 {
-    ASSERT(isMainThread());
     ASSERT(!sourceOrigin.isUnique());
     if (sourceOrigin.isUnique())
         return;
 
     String sourceString = sourceOrigin.toString();
+
+    Locker<Lock> locker(originAccessMapLock());
     OriginAccessMap& map = originAccessMap();
     OriginAccessMap::iterator it = map.find(sourceString);
     if (it == map.end())
@@ -169,7 +211,7 @@ void SecurityPolicy::removeOriginAccessWhitelistEntry(const SecurityOrigin& sour
 
 void SecurityPolicy::resetOriginAccessWhitelists()
 {
-    ASSERT(isMainThread());
+    Locker<Lock> locker(originAccessMapLock());
     originAccessMap().clear();
 }
 

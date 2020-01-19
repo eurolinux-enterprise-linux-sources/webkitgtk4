@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009, 2010, 2012-2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2009-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -43,7 +43,6 @@
 namespace JSC {
 
 class CodeBlock;
-class VM;
 
 // LinkBuffer:
 //
@@ -79,11 +78,10 @@ class LinkBuffer {
 #endif
 
 public:
-    LinkBuffer(VM& vm, MacroAssembler& macroAssembler, void* ownerUID, JITCompilationEffort effort = JITCompilationMustSucceed)
+    LinkBuffer(MacroAssembler& macroAssembler, void* ownerUID, JITCompilationEffort effort = JITCompilationMustSucceed)
         : m_size(0)
         , m_didAllocate(false)
         , m_code(0)
-        , m_vm(&vm)
 #ifndef NDEBUG
         , m_completed(false)
 #endif
@@ -95,7 +93,6 @@ public:
         : m_size(size)
         , m_didAllocate(false)
         , m_code(code)
-        , m_vm(0)
 #ifndef NDEBUG
         , m_completed(false)
 #endif
@@ -133,7 +130,7 @@ public:
     
     void link(Call call, CodeLocationLabel label)
     {
-        link(call, FunctionPtr(label.executableAddress()));
+        link(call, FunctionPtr(label));
     }
     
     void link(Jump jump, CodeLocationLabel label)
@@ -157,7 +154,7 @@ public:
     void patch(DataLabelPtr label, CodeLocationLabel value)
     {
         AssemblerLabel target = applyOffset(label.m_label);
-        MacroAssembler::linkPointer(code(), target, value.executableAddress());
+        MacroAssembler::linkPointer(code(), target, value);
     }
 
     // These methods are used to obtain handles to allow the code to be relinked / repatched later.
@@ -253,8 +250,6 @@ public:
     bool wasAlreadyDisassembled() const { return m_alreadyDisassembled; }
     void didAlreadyDisassemble() { m_alreadyDisassembled = true; }
 
-    VM& vm() { return *m_vm; }
-
 private:
 #if ENABLE(BRANCH_COMPACTION)
     int executableOffsetFor(int location)
@@ -305,7 +300,6 @@ private:
 #endif
     bool m_didAllocate;
     void* m_code;
-    VM* m_vm;
 #ifndef NDEBUG
     bool m_completed;
 #endif
@@ -313,19 +307,19 @@ private:
     Vector<RefPtr<SharedTask<void(LinkBuffer&)>>> m_linkTasks;
 };
 
-#define FINALIZE_CODE_IF(condition, linkBufferReference, dataLogFArgumentsForHeading)  \
+#define FINALIZE_CODE_IF(condition, linkBufferReference, ...)  \
     (UNLIKELY((condition))                                              \
-     ? ((linkBufferReference).finalizeCodeWithDisassembly dataLogFArgumentsForHeading) \
-     : (linkBufferReference).finalizeCodeWithoutDisassembly())
+        ? (linkBufferReference).finalizeCodeWithDisassembly(__VA_ARGS__) \
+        : (linkBufferReference).finalizeCodeWithoutDisassembly())
 
 bool shouldDumpDisassemblyFor(CodeBlock*);
 
-#define FINALIZE_CODE_FOR(codeBlock, linkBufferReference, dataLogFArgumentsForHeading)  \
-    FINALIZE_CODE_IF(shouldDumpDisassemblyFor(codeBlock) || Options::asyncDisassembly(), linkBufferReference, dataLogFArgumentsForHeading)
+#define FINALIZE_CODE_FOR(codeBlock, linkBufferReference, ...)  \
+    FINALIZE_CODE_IF((shouldDumpDisassemblyFor(codeBlock) || Options::asyncDisassembly()), linkBufferReference, __VA_ARGS__)
 
 // Use this to finalize code, like so:
 //
-// CodeRef code = FINALIZE_CODE(linkBuffer, ("my super thingy number %d", number));
+// CodeRef code = FINALIZE_CODE(linkBuffer, "my super thingy number %d", number);
 //
 // Which, in disassembly mode, will print:
 //
@@ -336,14 +330,14 @@ bool shouldDumpDisassemblyFor(CodeBlock*);
 //
 // ... and so on.
 //
-// Note that the dataLogFArgumentsForHeading are only evaluated when dumpDisassembly
+// Note that the format string and print arguments are only evaluated when dumpDisassembly
 // is true, so you can hide expensive disassembly-only computations inside there.
 
-#define FINALIZE_CODE(linkBufferReference, dataLogFArgumentsForHeading)  \
-    FINALIZE_CODE_IF(JSC::Options::asyncDisassembly() || JSC::Options::dumpDisassembly(), linkBufferReference, dataLogFArgumentsForHeading)
+#define FINALIZE_CODE(linkBufferReference, ...)  \
+    FINALIZE_CODE_IF((JSC::Options::asyncDisassembly() || JSC::Options::dumpDisassembly()), linkBufferReference, __VA_ARGS__)
 
-#define FINALIZE_DFG_CODE(linkBufferReference, dataLogFArgumentsForHeading)  \
-    FINALIZE_CODE_IF(JSC::Options::asyncDisassembly() || JSC::Options::dumpDisassembly() || Options::dumpDFGDisassembly(), linkBufferReference, dataLogFArgumentsForHeading)
+#define FINALIZE_DFG_CODE(linkBufferReference, ...)  \
+    FINALIZE_CODE_IF((JSC::Options::asyncDisassembly() || JSC::Options::dumpDisassembly() || Options::dumpDFGDisassembly()), linkBufferReference, __VA_ARGS__)
 
 } // namespace JSC
 

@@ -34,7 +34,8 @@
 #include "JSCustomElementInterface.h"
 #include "JSDOMBinding.h"
 #include "Microtasks.h"
-#include <heap/Heap.h>
+#include <JavaScriptCore/Heap.h>
+#include <wtf/NeverDestroyed.h>
 #include <wtf/Optional.h>
 #include <wtf/Ref.h>
 #include <wtf/SetForScope.h>
@@ -187,7 +188,7 @@ void CustomElementReactionQueue::enqueuePostUpgradeReactions(Element& element)
     if (element.hasAttributes()) {
         for (auto& attribute : element.attributesIterator()) {
             if (queue->m_interface->observesAttribute(attribute.localName()))
-                queue->m_items.append({attribute.name(), nullAtom, attribute.value()});
+                queue->m_items.append({attribute.name(), nullAtom(), attribute.value()});
         }
     }
 
@@ -197,7 +198,7 @@ void CustomElementReactionQueue::enqueuePostUpgradeReactions(Element& element)
 
 bool CustomElementReactionQueue::observesStyleAttribute() const
 {
-    return m_interface->observesAttribute(HTMLNames::styleAttr.localName());
+    return m_interface->observesAttribute(HTMLNames::styleAttr->localName());
 }
 
 void CustomElementReactionQueue::invokeAll(Element& element)

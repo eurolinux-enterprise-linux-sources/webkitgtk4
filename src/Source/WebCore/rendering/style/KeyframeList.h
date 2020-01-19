@@ -25,10 +25,8 @@
 #pragma once
 
 #include "CSSPropertyNames.h"
-#include "StyleInheritedData.h"
 #include <wtf/Vector.h>
 #include <wtf/HashSet.h>
-#include <wtf/RefPtr.h>
 #include <wtf/text/AtomicString.h>
 
 namespace WebCore {
@@ -67,14 +65,13 @@ public:
     explicit KeyframeList(const AtomicString& animationName)
         : m_animationName(animationName)
     {
-        insert(KeyframeValue(0, 0));
-        insert(KeyframeValue(1, 0));
     }
     ~KeyframeList();
         
+    KeyframeList& operator=(KeyframeList&&) = default;
     bool operator==(const KeyframeList& o) const;
     bool operator!=(const KeyframeList& o) const { return !(*this == o); }
-    
+
     const AtomicString& animationName() const { return m_animationName; }
     
     void insert(KeyframeValue&&);

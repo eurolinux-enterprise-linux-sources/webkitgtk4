@@ -1,0 +1,15 @@
+diff -up webkitgtk-2.20.4/Source/WebCore/accessibility/AccessibilityRenderObject.cpp.atk_continuation_crash webkitgtk-2.20.4/Source/WebCore/accessibility/AccessibilityRenderObject.cpp
+--- webkitgtk-2.20.4/Source/WebCore/accessibility/AccessibilityRenderObject.cpp.atk_continuation_crash	2018-02-20 09:25:28.000000000 +0100
++++ webkitgtk-2.20.4/Source/WebCore/accessibility/AccessibilityRenderObject.cpp	2018-08-07 11:43:19.438679595 +0200
+@@ -381,8 +381,9 @@ AccessibilityObject* AccessibilityRender
+ 
+     // Case 5: node has no next sibling, and its parent is an inline with a continuation.
+     // Case 5.1: After case 4, (the element was inline w/ continuation but had no sibling), then check it's parent.
+-    if (!nextSibling && isInlineWithContinuation(*m_renderer->parent())) {
+-        auto& continuation = *downcast<RenderInline>(*m_renderer->parent()).continuation();
++    auto parent = m_renderer->parent();
++    if (!nextSibling && parent && isInlineWithContinuation(*parent)) {
++        auto& continuation = *downcast<RenderInline>(*parent).continuation();
+         
+         // Case 5a: continuation is a block - in this case the block itself is the next sibling.
+         if (is<RenderBlock>(continuation))

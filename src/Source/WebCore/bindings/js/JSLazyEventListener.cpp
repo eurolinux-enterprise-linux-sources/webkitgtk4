@@ -1,6 +1,6 @@
 /*
  *  Copyright (C) 2001 Peter Kelly (pmk@post.com)
- *  Copyright (C) 2003-2016 Apple Inc. All Rights Reserved.
+ *  Copyright (C) 2003-2017 Apple Inc. All Rights Reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -21,19 +21,24 @@
 #include "JSLazyEventListener.h"
 
 #include "CachedScriptFetcher.h"
+#include "ContainerNode.h"
 #include "ContentSecurityPolicy.h"
+#include "Document.h"
+#include "Element.h"
 #include "Frame.h"
 #include "JSNode.h"
+#include "QualifiedName.h"
 #include "ScriptController.h"
-#include <runtime/FunctionConstructor.h>
-#include <runtime/IdentifierInlines.h>
+#include <JavaScriptCore/CatchScope.h>
+#include <JavaScriptCore/FunctionConstructor.h>
+#include <JavaScriptCore/IdentifierInlines.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/RefCountedLeakCounter.h>
 #include <wtf/StdLibExtras.h>
 
-using namespace JSC;
 
 namespace WebCore {
+using namespace JSC;
 
 DEFINE_DEBUG_ONLY_GLOBAL(WTF::RefCountedLeakCounter, eventListenerCounter, ("JSLazyEventListener"));
 
@@ -71,18 +76,19 @@ JSLazyEventListener::~JSLazyEventListener()
 #endif
 }
 
-JSObject* JSLazyEventListener::initializeJSFunction(ScriptExecutionContext* executionContext) const
+JSObject* JSLazyEventListener::initializeJSFunction(ScriptExecutionContext& executionContext) const
 {
     ASSERT(is<Document>(executionContext));
-    if (!executionContext)
-        return nullptr;
-
     ASSERT(!m_code.isNull());
     ASSERT(!m_eventParameterName.isNull());
     if (m_code.isNull() || m_eventParameterName.isNull())
         return nullptr;
 
-    Document& document = downcast<Document>(*executionContext);
+    // As per the HTML specification [1], if this is an element's event handler, then document should be the
+    // element's document. The script execution context may be different from the node's document if the
+    // node's document was created by JavaScript.
+    // [1] https://html.spec.whatwg.org/multipage/webappapis.html#getting-the-current-value-of-the-event-handler
+    Document& document = m_originalNode ? m_originalNode->document() : downcast<Document>(executionContext);
 
     if (!document.frame())
         return nullptr;
@@ -91,10 +97,10 @@ JSObject* JSLazyEventListener::initializeJSFunction(ScriptExecutionContext* exec
         return nullptr;
 
     ScriptController& script = document.frame()->script();
-    if (!script.canExecuteScripts(AboutToExecuteScript) || script.isPaused())
+    if (!script.canExecuteScripts(AboutToCreateEventListener) || script.isPaused())
         return nullptr;
 
-    JSDOMGlobalObject* globalObject = toJSDOMGlobalObject(executionContext, isolatedWorld());
+    JSDOMGlobalObject* globalObject = toJSDOMGlobalObject(&executionContext, isolatedWorld());
     if (!globalObject)
         return nullptr;
 
@@ -106,6 +112,7 @@ JSObject* JSLazyEventListener::initializeJSFunction(ScriptExecutionContext* exec
     MarkedArgumentBuffer args;
     args.append(jsNontrivialString(exec, m_eventParameterName));
     args.append(jsStringWithCache(exec, m_code));
+    ASSERT(!args.hasOverflowed());
 
     // We want all errors to refer back to the line on which our attribute was
     // declared, regardless of any newlines in our JavaScript source text.
@@ -139,8 +146,8 @@ JSObject* JSLazyEventListener::initializeJSFunction(ScriptExecutionContext* exec
 
 static const String& eventParameterName(bool isSVGEvent)
 {
-    static NeverDestroyed<const String> eventString(ASCIILiteral("event"));
-    static NeverDestroyed<const String> evtString(ASCIILiteral("evt"));
+    static NeverDestroyed<const String> eventString(MAKE_STATIC_STRING_IMPL("event"));
+    static NeverDestroyed<const String> evtString(MAKE_STATIC_STRING_IMPL("evt"));
     return isSVGEvent ? evtString : eventString;
 }
 
@@ -162,7 +169,7 @@ RefPtr<JSLazyEventListener> JSLazyEventListener::create(const CreationArguments&
     TextPosition position;
     String sourceURL;
     if (Frame* frame = arguments.document.frame()) {
-        if (!frame->script().canExecuteScripts(AboutToExecuteScript))
+        if (!frame->script().canExecuteScripts(AboutToCreateEventListener))
             return nullptr;
         position = frame->script().eventHandlerPosition();
         sourceURL = arguments.document.url().string();

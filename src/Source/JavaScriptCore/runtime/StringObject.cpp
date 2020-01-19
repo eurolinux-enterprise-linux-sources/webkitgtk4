@@ -30,7 +30,7 @@ namespace JSC {
 
 STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(StringObject);
 
-const ClassInfo StringObject::s_info = { "String", &JSWrapperObject::s_info, 0, CREATE_METHOD_TABLE(StringObject) };
+const ClassInfo StringObject::s_info = { "String", &JSWrapperObject::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(StringObject) };
 
 StringObject::StringObject(VM& vm, Structure* structure)
     : JSWrapperObject(vm, structure)
@@ -96,7 +96,8 @@ bool StringObject::putByIndex(JSCell* cell, ExecState* exec, unsigned propertyNa
 
 static bool isStringOwnProperty(ExecState* exec, StringObject* object, PropertyName propertyName)
 {
-    if (propertyName == exec->propertyNames().length)
+    VM& vm = exec->vm();
+    if (propertyName == vm.propertyNames->length)
         return true;
     if (std::optional<uint32_t> index = parseIndex(propertyName)) {
         if (object->internalValue()->canGetIndex(index.value()))
@@ -132,8 +133,9 @@ bool StringObject::defineOwnProperty(JSObject* object, ExecState* exec, Property
 
 bool StringObject::deleteProperty(JSCell* cell, ExecState* exec, PropertyName propertyName)
 {
+    VM& vm = exec->vm();
     StringObject* thisObject = jsCast<StringObject*>(cell);
-    if (propertyName == exec->propertyNames().length)
+    if (propertyName == vm.propertyNames->length)
         return false;
     std::optional<uint32_t> index = parseIndex(propertyName);
     if (index && thisObject->internalValue()->canGetIndex(index.value()))
@@ -157,9 +159,16 @@ void StringObject::getOwnPropertyNames(JSObject* object, ExecState* exec, Proper
         for (int i = 0; i < size; ++i)
             propertyNames.add(Identifier::from(exec, i));
     }
-    if (mode.includeDontEnumProperties())
-        propertyNames.add(exec->propertyNames().length);
     return JSObject::getOwnPropertyNames(thisObject, exec, propertyNames, mode);
+}
+
+void StringObject::getOwnNonIndexPropertyNames(JSObject* object, ExecState* exec, PropertyNameArray& propertyNames, EnumerationMode mode)
+{
+    VM& vm = exec->vm();
+    StringObject* thisObject = jsCast<StringObject*>(object);
+    if (mode.includeDontEnumProperties())
+        propertyNames.add(vm.propertyNames->length);
+    return JSObject::getOwnNonIndexPropertyNames(thisObject, exec, propertyNames, mode);
 }
 
 StringObject* constructString(VM& vm, JSGlobalObject* globalObject, JSValue string)

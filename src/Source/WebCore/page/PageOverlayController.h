@@ -65,7 +65,7 @@ public:
     void didChangeViewSize();
     void didChangeDocumentSize();
     void didChangeSettings();
-    void didChangeDeviceScaleFactor();
+    WEBCORE_EXPORT void didChangeDeviceScaleFactor();
     void didChangeViewExposedRect();
     void didScrollFrame(Frame&);
 
@@ -88,7 +88,7 @@ private:
 
     // GraphicsLayerClient
     void notifyFlushRequired(const GraphicsLayer*) override;
-    void paintContents(const GraphicsLayer*, GraphicsContext&, GraphicsLayerPaintingPhase, const FloatRect& clipRect) override;
+    void paintContents(const GraphicsLayer*, GraphicsContext&, GraphicsLayerPaintingPhase, const FloatRect& clipRect, GraphicsLayerPaintBehavior) override;
     float deviceScaleFactor() const override;
     bool shouldSkipLayerInDump(const GraphicsLayer*, LayerTreeAsTextBehavior) const override;
     void tiledBackingUsageChanged(const GraphicsLayer*, bool) override;

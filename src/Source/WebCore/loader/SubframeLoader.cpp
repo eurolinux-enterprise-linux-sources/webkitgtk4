@@ -46,6 +46,7 @@
 #include "HTMLObjectElement.h"
 #include "MIMETypeRegistry.h"
 #include "MainFrame.h"
+#include "NavigationScheduler.h"
 #include "Page.h"
 #include "PluginData.h"
 #include "PluginDocument.h"
@@ -410,7 +411,7 @@ bool SubframeLoader::loadPlugin(HTMLPlugInImageElement& pluginElement, const URL
         loadManually = false;
 #endif
 
-    auto weakRenderer = renderer->createWeakPtr();
+    auto weakRenderer = makeWeakPtr(*renderer);
 
     auto widget = m_frame.loader().client().createPlugin(contentSize, pluginElement, url, paramNames, paramValues, mimeType, loadManually);
 

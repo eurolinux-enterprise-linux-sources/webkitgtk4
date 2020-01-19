@@ -1,0 +1,15 @@
+diff -up webkitgtk-2.20.3/Source/JavaScriptCore/runtime/HashMapImpl.h.memset_zero_length webkitgtk-2.20.3/Source/JavaScriptCore/runtime/HashMapImpl.h
+--- webkitgtk-2.20.3/Source/JavaScriptCore/runtime/HashMapImpl.h.memset_zero_length	2018-02-19 08:45:16.000000000 +0100
++++ webkitgtk-2.20.3/Source/JavaScriptCore/runtime/HashMapImpl.h	2018-06-26 09:29:58.672408600 +0200
+@@ -220,7 +220,10 @@ public:
+ 
+     ALWAYS_INLINE void reset(uint32_t capacity)
+     {
+-        memset(this, -1, allocationSize(capacity));
++#if COMPILER(GCC_OR_CLANG) && defined(_FORTIFY_SOURCE)
++        if (capacity && allocationSize(capacity))
++#endif
++            memset(this, -1, allocationSize(capacity));
+     }
+ };
+ 

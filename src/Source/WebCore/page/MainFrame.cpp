@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,7 +33,6 @@
 #include "PerformanceLogging.h"
 #include "ScrollLatchingState.h"
 #include "WheelEventDeltaFilter.h"
-#include <wtf/NeverDestroyed.h>
 
 #if PLATFORM(MAC)
 #include "ServicesOverlayController.h"
@@ -52,6 +51,9 @@ inline MainFrame::MainFrame(Page& page, PageConfiguration& configuration)
 #if ENABLE(APPLE_PAY)
     , m_paymentCoordinator(std::make_unique<PaymentCoordinator>(*configuration.paymentCoordinatorClient))
 #endif
+#if ENABLE(APPLICATION_MANIFEST)
+    , m_applicationManifest(configuration.applicationManifest)
+#endif
     , m_performanceLogging(std::make_unique<PerformanceLogging>(*this))
 {
 }
@@ -59,7 +61,6 @@ inline MainFrame::MainFrame(Page& page, PageConfiguration& configuration)
 MainFrame::~MainFrame()
 {
     m_recentWheelEventDeltaFilter = nullptr;
-    m_eventHandler = nullptr;
 
     setMainFrameWasDestroyed();
 }
@@ -97,7 +98,6 @@ void MainFrame::dropChildren()
 
 void MainFrame::didCompleteLoad()
 {
-    m_timeOfLastCompletedLoad = MonotonicTime::now();
     performanceLogging().didReachPointOfInterest(PerformanceLogging::MainFrameLoadCompleted);
 }
 
@@ -137,6 +137,13 @@ void MainFrame::removeLatchingStateForTarget(Element& targetNode)
 
         return targetNode.isEqualNode(wheelElement);
     });
+}
+#endif
+
+#if ENABLE(APPLE_PAY)
+void MainFrame::setPaymentCoordinator(std::unique_ptr<PaymentCoordinator>&& paymentCoordinator)
+{
+    m_paymentCoordinator = WTFMove(paymentCoordinator);
 }
 #endif
 

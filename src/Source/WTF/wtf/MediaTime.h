@@ -30,6 +30,7 @@
 #define WTF_MediaTime_h
 
 #include <wtf/FastMalloc.h>
+#include <wtf/text/WTFString.h>
 
 #include <cmath>
 #include <limits>
@@ -108,6 +109,8 @@ public:
     const uint32_t& timeScale() const { return m_timeScale; }
 
     void dump(PrintStream& out) const;
+    String toString() const;
+    String toJSONString() const;
 
     // Make the following casts errors:
     operator double() const = delete;
@@ -120,8 +123,21 @@ public:
     static const uint32_t DefaultTimeScale = 10000000;
     static const uint32_t MaximumTimeScale;
 
+    enum class RoundingFlags {
+        HalfAwayFromZero = 0,
+        TowardZero,
+        AwayFromZero,
+        TowardPositiveInfinity,
+        TowardNegativeInfinity,
+    };
+
+    MediaTime toTimeScale(uint32_t, RoundingFlags = RoundingFlags::HalfAwayFromZero) const;
+
+    template<class Encoder> void encode(Encoder&) const;
+    template<class Decoder> static bool decode(Decoder&, MediaTime&);
+
 private:
-    void setTimeScale(uint32_t);
+    void setTimeScale(uint32_t, RoundingFlags = RoundingFlags::HalfAwayFromZero);
 
     union {
         int64_t m_timeValue;
@@ -134,6 +150,21 @@ private:
 inline MediaTime operator*(int32_t lhs, const MediaTime& rhs) { return rhs.operator*(lhs); }
 
 WTF_EXPORT_PRIVATE extern MediaTime abs(const MediaTime& rhs);
+
+template<class Encoder>
+void MediaTime::encode(Encoder& encoder) const
+{
+    encoder << m_timeValue << m_timeScale << m_timeFlags;
+}
+
+template<class Decoder>
+bool MediaTime::decode(Decoder& decoder, MediaTime& time)
+{
+    return decoder.decode(time.m_timeValue)
+        && decoder.decode(time.m_timeScale)
+        && decoder.decode(time.m_timeFlags);
+}
+
 }
 
 using WTF::MediaTime;

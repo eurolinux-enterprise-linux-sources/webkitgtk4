@@ -55,7 +55,9 @@ ResourceType toResourceType(CachedResource::Type type)
 #endif
         return ResourceType::Font;
 
+    case CachedResource::Beacon:
     case CachedResource::MediaResource:
+    case CachedResource::Icon:
     case CachedResource::RawResource:
         return ResourceType::Raw;
 
@@ -68,7 +70,12 @@ ResourceType toResourceType(CachedResource::Type type)
     case CachedResource::LinkSubresource:
         ASSERT_NOT_REACHED();
 #endif
+#if ENABLE(APPLICATION_MANIFEST)
+    case CachedResource::ApplicationManifest:
+        return ResourceType::Raw;
+#endif
     };
+    return ResourceType::Raw;
 }
 
 uint16_t readResourceType(const String& name)

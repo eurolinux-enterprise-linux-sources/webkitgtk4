@@ -29,7 +29,6 @@
 
 #pragma once
 
-#include "CSSCustomIdentValue.h"
 #include "CSSFunctionValue.h"
 #include "CSSParserMode.h"
 #include "CSSParserTokenRange.h"
@@ -62,11 +61,13 @@ bool consumePositiveIntegerRaw(CSSParserTokenRange&, int& result);
 RefPtr<CSSPrimitiveValue> consumePositiveInteger(CSSParserTokenRange&);
 bool consumeNumberRaw(CSSParserTokenRange&, double& result);
 RefPtr<CSSPrimitiveValue> consumeNumber(CSSParserTokenRange&, ValueRange);
+RefPtr<CSSPrimitiveValue> consumeFontWeightNumber(CSSParserTokenRange&);
 RefPtr<CSSPrimitiveValue> consumeLength(CSSParserTokenRange&, CSSParserMode, ValueRange, UnitlessQuirk = UnitlessQuirk::Forbid);
 RefPtr<CSSPrimitiveValue> consumePercent(CSSParserTokenRange&, ValueRange);
 RefPtr<CSSPrimitiveValue> consumeLengthOrPercent(CSSParserTokenRange&, CSSParserMode, ValueRange, UnitlessQuirk = UnitlessQuirk::Forbid);
 RefPtr<CSSPrimitiveValue> consumeAngle(CSSParserTokenRange&, CSSParserMode, UnitlessQuirk = UnitlessQuirk::Forbid);
 RefPtr<CSSPrimitiveValue> consumeTime(CSSParserTokenRange&, CSSParserMode, ValueRange, UnitlessQuirk = UnitlessQuirk::Forbid);
+RefPtr<CSSPrimitiveValue> consumeResolution(CSSParserTokenRange&);
 
 RefPtr<CSSPrimitiveValue> consumeIdent(CSSParserTokenRange&);
 RefPtr<CSSPrimitiveValue> consumeIdentRange(CSSParserTokenRange&, CSSValueID lower, CSSValueID upper);

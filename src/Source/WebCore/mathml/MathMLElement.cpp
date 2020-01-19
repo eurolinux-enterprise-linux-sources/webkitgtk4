@@ -32,6 +32,7 @@
 #if ENABLE(MATHML)
 
 #include "EventHandler.h"
+#include "FrameLoader.h"
 #include "HTMLAnchorElement.h"
 #include "HTMLParserIdioms.h"
 #include "MathMLNames.h"
@@ -164,14 +165,6 @@ bool MathMLElement::canStartSelection() const
         return StyledElement::canStartSelection();
 
     return hasEditableStyle();
-}
-
-bool MathMLElement::isFocusable() const
-{
-    if (renderer() && renderer()->absoluteClippedOverflowRect().isEmpty())
-        return false;
-
-    return StyledElement::isFocusable();
 }
 
 bool MathMLElement::isKeyboardFocusable(KeyboardEvent& event) const

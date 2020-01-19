@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -69,7 +69,9 @@ public:
             osrEntry, osrEntry.size(), bytecodeIndex,
             getOSREntryDataBytecodeIndex);
     }
-    
+
+    void finalizeOSREntrypoints();
+
     unsigned appendOSRExit(const OSRExit& exit)
     {
         unsigned result = osrExit.size();
@@ -118,7 +120,7 @@ public:
     RegisterSet liveRegistersToPreserveAtExceptionHandlingCallSite(CodeBlock*, CallSiteIndex) override;
 #if ENABLE(FTL_JIT)
     CodeBlock* osrEntryBlock() { return m_osrEntryBlock.get(); }
-    void setOSREntryBlock(VM& vm, const JSCell* owner, CodeBlock* osrEntryBlock) { m_osrEntryBlock.set(vm, owner, osrEntryBlock); }
+    void setOSREntryBlock(VM&, const JSCell* owner, CodeBlock* osrEntryBlock);
     void clearOSREntryBlock() { m_osrEntryBlock.clear(); }
 #endif
 
@@ -136,6 +138,7 @@ public:
     Vector<DFG::SpeculationRecovery> speculationRecovery;
     DFG::VariableEventStream variableEventStream;
     DFG::MinifiedGraph minifiedDFG;
+
 #if ENABLE(FTL_JIT)
     uint8_t neverExecutedEntry { 1 };
 

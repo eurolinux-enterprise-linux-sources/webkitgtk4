@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright (C) 2016 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -361,6 +361,15 @@ TEST_F(URLParserTest, Basic)
     checkURL("file:///#fragment", {"file", "", "", "", 0, "/", "", "fragment", "file:///#fragment"});
     checkURL("file:////?query", {"file", "", "", "", 0, "//", "query", "", "file:////?query"});
     checkURL("file:////#fragment", {"file", "", "", "", 0, "//", "", "fragment", "file:////#fragment"});
+    checkURL("file://?Q", {"file", "", "", "", 0, "/", "Q", "", "file:///?Q"});
+    checkURL("file://#F", {"file", "", "", "", 0, "/", "", "F", "file:///#F"});
+    checkURL("file://host?Q", {"file", "", "", "host", 0, "/", "Q", "", "file://host/?Q"});
+    checkURL("file://host#F", {"file", "", "", "host", 0, "/", "", "F", "file://host/#F"});
+    checkURL("file://host\\P", {"file", "", "", "host", 0, "/P", "", "", "file://host/P"});
+    checkURL("file://host\\?Q", {"file", "", "", "host", 0, "/", "Q", "", "file://host/?Q"});
+    checkURL("file://host\\../P", {"file", "", "", "host", 0, "/P", "", "", "file://host/P"});
+    checkURL("file://host\\/../P", {"file", "", "", "host", 0, "/P", "", "", "file://host/P"});
+    checkURL("file://host\\/P", {"file", "", "", "host", 0, "//P", "", "", "file://host//P"});
     checkURL("http://host/A b", {"http", "", "", "host", 0, "/A%20b", "", "", "http://host/A%20b"});
     checkURL("http://host/a%20B", {"http", "", "", "host", 0, "/a%20B", "", "", "http://host/a%20B"});
     checkURL("http://host?q=@ <>!#fragment", {"http", "", "", "host", 0, "/", "q=@%20%3C%3E!", "fragment", "http://host/?q=@%20%3C%3E!#fragment"});
@@ -1298,7 +1307,8 @@ TEST_F(URLParserTest, QueryEncoding)
     checkURL(makeString("gopher://host/path?", withUmlauts, "#fragment"), "asdf://example.com/?doesntmatter", iso88591, {"gopher", "", "", "host", 0, "/path", "%DC%26%231072%3B%26%231105%3B", "fragment", "gopher://host/path?%DC%26%231072%3B%26%231105%3B#fragment"});
     checkURL(makeString("asdf://host/path?", withUmlauts, "#fragment"), "http://example.com/?doesntmatter", iso88591, {"asdf", "", "", "host", 0, "/path", "%C3%9C%D0%B0%D1%91", "fragment", "asdf://host/path?%C3%9C%D0%B0%D1%91#fragment"});
 
-    checkURL("http://host/?query=foo'bar", UTF8Encoding(), {"http", "", "", "host", 0, "/", "query=foo%27bar", "", "http://host/?query=foo%27bar"});
+    checkURL("http://host/pa'th?qu'ery#fr'agment", UTF8Encoding(), {"http", "", "", "host", 0, "/pa'th", "qu%27ery", "fr'agment", "http://host/pa'th?qu%27ery#fr'agment"});
+    checkURL("asdf://host/pa'th?qu'ery#fr'agment", UTF8Encoding(), {"asdf", "", "", "host", 0, "/pa'th", "qu'ery", "fr'agment", "asdf://host/pa'th?qu'ery#fr'agment"});
     // FIXME: Add more tests with other encodings and things like non-ascii characters, emoji and unmatched surrogate pairs.
 }
 

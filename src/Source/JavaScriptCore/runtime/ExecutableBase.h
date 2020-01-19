@@ -29,14 +29,8 @@
 #include "CallData.h"
 #include "CodeBlockHash.h"
 #include "CodeSpecializationKind.h"
-#include "CompilationResult.h"
-#include "ExecutableInfo.h"
-#include "HandlerInfo.h"
-#include "InferredValue.h"
 #include "JITCode.h"
 #include "JSGlobalObject.h"
-#include "SourceCode.h"
-#include "TypeSet.h"
 #include "UnlinkedCodeBlock.h"
 #include "UnlinkedFunctionExecutable.h"
 
@@ -87,6 +81,10 @@ public:
 
     static const bool needsDestruction = true;
     static void destroy(JSCell*);
+    
+    // Force subclasses to override this.
+    template<typename>
+    static void subspaceFor(VM&) { }
         
     CodeBlockHash hashFor(CodeSpecializationKind) const;
 

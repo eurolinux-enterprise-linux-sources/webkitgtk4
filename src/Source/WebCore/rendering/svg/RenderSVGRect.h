@@ -27,12 +27,13 @@
 
 #pragma once
 
-#include "RenderSVGPath.h"
+#include "RenderSVGShape.h"
 #include "SVGRectElement.h"
 
 namespace WebCore {
 
 class RenderSVGRect final : public RenderSVGShape {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGRect);
 public:
     RenderSVGRect(SVGRectElement&, RenderStyle&&);
     virtual ~RenderSVGRect();

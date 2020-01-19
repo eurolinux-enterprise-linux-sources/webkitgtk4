@@ -23,11 +23,11 @@
 %global _dwz_max_die_limit_x86_64 250000000
 
 # As we are using the DTS we have to build this package as:
-# rhpkg build --target devtoolset-6-rhel-7.5-candidate
+# rhpkg build --target rhel-7.6-devtoolset-7-candidate
 
 Name:           webkitgtk4
-Version:        2.16.6
-Release:        6%{?dist}
+Version:        2.20.5
+Release:        1%{?dist}
 Summary:        GTK+ Web content engine library
 
 License:        LGPLv2
@@ -37,46 +37,53 @@ Source0:        http://webkitgtk.org/releases/webkitgtk-%{version}.tar.xz
 Source1:        http://download.icu-project.org/files/icu4c/57.1/icu4c-57_1-src.tgz
 %endif
 
-# https://bugs.webkit.org/show_bug.cgi?id=156596
-Patch0:         webkit-inttypes-prid64.patch
-# https://bugs.webkit.org/show_bug.cgi?id=132333
-Patch1:         webkit-cloop-big-endians.patch
-# https://bugs.webkit.org/show_bug.cgi?id=169029
-Patch2:         webkit-covscan-jsc-options.patch
-# https://bugs.webkit.org/show_bug.cgi?id=169055
-Patch3:         webkit-covscan-jsc-options-followup.patch
-# https://bugs.webkit.org/show_bug.cgi?id=169604
-Patch4:         webkit-covscan-webprocess.patch
-# https://bugs.webkit.org/show_bug.cgi?id=169602
-Patch5:         webkit-covscan-uiprocess.patch
-# https://bugs.webkit.org/show_bug.cgi?id=169598
-Patch6:         webkit-covscan-networkprocess.patch
-# Lower the required libgcrypt version as we don't have 1.6 in RHEL 7 and
-# actually it is not needed at all.
-Patch7:         webkit-lower-libgcrypt-version.patch
-# https://bugs.webkit.org/show_bug.cgi?id=175125
-# follow-up https://trac.webkit.org/changeset/220331/webkit
-Patch8:         webkit-egl-cflags.patch
-# https://bugs.webkit.org/show_bug.cgi?id=173306
-Patch10:         webkit-spreaker-gstreamer-fix.patch
-# https://bugs.webkit.org/show_bug.cgi?id=175416
-Patch11:         webkit-cmake-whole-archive.patch
-# https://bugs.webkit.org/show_bug.cgi?id=171161
-Patch12:        webkit-on-demand-ac-crash.patch
-# https://bugs.webkit.org/show_bug.cgi?id=129879
-Patch13:        webkit-geoclue2-desktop-id.patch
-# https://bugs.webkit.org/show_bug.cgi?id=171443
-Patch14:        webkit-accessibility-performance.patch
-# https://bugs.webkit.org/show_bug.cgi?id=171927
-Patch15:        webkit-accessibility-assertion.patch
 
-Patch16:        webkit-covscan-cssgrid.patch
-# https://bugs.webkit.org/show_bug.cgi?id=176357
-Patch17:        webkit-covscan-urlparser.patch
-# https://bugs.webkit.org/show_bug.cgi?id=167304
-Patch18:        webkit-update-bundled-brotli-and-woff2.patch
-# https://bugs.webkit.org/show_bug.cgi?id=177994
-Patch19:        webkit-relicense-bundled-woff2-to-mit.patch
+# https://bugs.webkit.org/show_bug.cgi?id=132333
+Patch0:         webkit-cloop_big_endians.patch
+# Silly workaround for
+# https://bugs.webkit.org/show_bug.cgi?id=182923
+Patch1:         webkit-page_size.patch
+# Revert woff2 and brotli removal to bundle them again, as they are not
+# included in RHEL 7
+# https://bugs.webkit.org/show_bug.cgi?id=179630
+Patch2:         webkit-woff2_1.0.2.patch
+# https://trac.webkit.org/changeset/224329
+Patch3:         webkit-library_typos.patch
+# https://bugs.webkit.org/show_bug.cgi?id=177862
+Patch4:         webkit-remove_woff2.patch
+# https://bugs.webkit.org/show_bug.cgi?id=177804
+Patch5:         webkit-remove_brotli.patch
+# We don't have new enough version of libgcrypt to support Subtle Crypto, lower
+# the version in the check so configure can pass and also disable Subtle Crypto
+# through cmake argument.
+Patch6:         webkit-lower_libgcrypt_version.patch
+# We don't have new enough version of libwebp (that has demux) to support the
+# animated WebP images - revert the change that introduced it.
+Patch7:         webkit-no_webp_demux.patch
+Patch8:         webkit-memset_zero_length.patch
+Patch9:         webkit-covscan_already_fixed.patch
+Patch10:        webkit-covscan_uninit_ctor.patch
+Patch11:        webkit-covscan_uninit.patch
+# https://bugs.webkit.org/show_bug.cgi?id=186756
+Patch12:        webkit-covscan_1.patch
+# https://bugs.webkit.org/show_bug.cgi?id=186757
+Patch13:        webkit-covscan_2.patch
+Patch14:        webkit-covscan_3.patch
+# https://bugs.webkit.org/show_bug.cgi?id=186758
+Patch15:        webkit-covscan_va_close.patch
+# https://bugs.webkit.org/show_bug.cgi?id=186763
+Patch16:        webkit-covscan_bmalloc.patch
+# https://bugs.webkit.org/show_bug.cgi?id=186800
+Patch17:        webkit-covscan_wtf.patch
+# https://bugs.webkit.org/show_bug.cgi?id=187087
+Patch18:        webkit-covscan_gstreamer.patch
+# For QA tests
+Patch19:        webkit-minibrowser-labels.patch
+# https://bugzilla.redhat.com/show_bug.cgi?id=1591638
+Patch20:        webkit-atk_crash.patch
+# https://bugzilla.redhat.com/show_bug.cgi?id=1503624
+Patch21:        webkit-atk_continuation_crash.patch
+
 
 %if 0%{?bundle_icu}
 Patch50: icu-8198.revert.icu5431.patch
@@ -95,7 +102,6 @@ Patch59: icu-rhbz1444101-icu-changeset-39671.patch
 BuildRequires:  at-spi2-core-devel
 BuildRequires:  bison
 BuildRequires:  cairo-devel
-BuildRequires:  cmake
 BuildRequires:  enchant-devel
 BuildRequires:  flex
 BuildRequires:  fontconfig-devel
@@ -107,6 +113,7 @@ BuildRequires:  gobject-introspection-devel
 BuildRequires:  gperf
 BuildRequires:  gstreamer1-devel
 BuildRequires:  gstreamer1-plugins-base-devel
+BuildRequires:  gstreamer1-plugins-bad-free-devel
 BuildRequires:  gtk2-devel
 BuildRequires:  gtk3-devel
 BuildRequires:  gtk-doc >= 1.25
@@ -122,8 +129,12 @@ BuildRequires:  libsoup-devel >= 2.56
 BuildRequires:  libwebp-devel
 BuildRequires:  libxslt-devel
 BuildRequires:  libXt-devel
-BuildRequires:  wayland-devel
+BuildRequires:  libwayland-client-devel
+BuildRequires:  libwayland-egl-devel
+BuildRequires:  libwayland-server-devel
+BuildRequires:  mesa-libEGL-devel
 BuildRequires:  mesa-libGL-devel
+BuildRequires:  mesa-libGLES-devel
 BuildRequires:  pcre-devel
 BuildRequires:  perl-Switch
 BuildRequires:  perl-JSON-PP
@@ -133,12 +144,14 @@ BuildRequires:  sqlite-devel
 BuildRequires:  hyphen-devel
 BuildRequires:  gnutls-devel
 %if 0%{?rhel} == 7
-BuildRequires: devtoolset-6-gcc
-BuildRequires: devtoolset-6-gcc-c++
-BuildRequires: devtoolset-6-build
-BuildRequires: devtoolset-6-libatomic-devel
+BuildRequires: devtoolset-7-gcc
+BuildRequires: devtoolset-7-gcc-c++
+BuildRequires: devtoolset-7-build
+BuildRequires: devtoolset-7-libatomic-devel
+BuildRequires: llvm-toolset-7-cmake
 %else
 BuildRequires:  libatomic
+BuildRequires:  cmake
 %endif
 
 Requires:       geoclue2
@@ -231,25 +244,28 @@ Support for the GTK+ 2 based NPAPI plugins (such as Adobe Flash) for %{name}.
 %patch59 -p1 -b .rhbz1444101-icu-changeset-39671.patch
 
 %setup -q -T -n webkitgtk-%{version} -b 0
-%patch0 -p1
-%patch1 -p1
-%patch2 -p1
-%patch3 -p1
-%patch4 -p1
-%patch5 -p1
-%patch6 -p1
-%patch7 -p1
-%patch8 -p1
-%patch10 -p1
-%patch11 -p1
-%patch12 -p1
-%patch13 -p1
-%patch14 -p1
-%patch15 -p1
-%patch16 -p1
-%patch17 -p1
-%patch18 -p1
-%patch19 -p1
+%patch0 -p1 -b .cloop_big_endians
+%patch1 -p1 -b .page_size
+%patch2 -R -p1 -b .woff2_1.0.2
+%patch3 -R -p1 -b .library_typos
+%patch4 -p1 -b .remove_woff2
+%patch5 -p1 -b .remove_brotli
+%patch6 -p1 -b .lower_libgcrypt_version
+%patch7 -p1 -b .no_webp_demux
+%patch8 -p1 -b .memset_zero_length
+%patch9 -p1 -b .covscan_already_fixed
+%patch10 -p1 -b .covscan_uninit_ctor
+%patch11 -p1 -b .covscan_uninit
+%patch12 -p1 -b .covscan_1
+%patch13 -p1 -b .covscan_2
+%patch14 -p1 -b .covscan_3
+%patch15 -p1 -b .covscan_va_close
+%patch16 -p1 -b .covscan_bmalloc
+%patch17 -p1 -b .covscan_wtf
+%patch18 -p1 -b .covscan_gstreamer
+%patch19 -p1 -b .minibrowser_labels
+%patch20 -p1 -b .atk_crash
+%patch21 -p1 -b .atk_continuation_crash
 %else
 %autosetup -p1 -n webkitgtk-%{version}
 %endif
@@ -324,11 +340,14 @@ popd
 
 # Enable DTS
 %if 0%{?rhel} == 7
-%{?enable_devtoolset6:%{enable_devtoolset6}}
+source /opt/rh/devtoolset-7/enable
+source /opt/rh/llvm-toolset-7/enable
+%define __cmake /opt/rh/llvm-toolset-7/root/usr/bin/cmake
 %endif
 
 # Disable ld.gold on s390 as it does not have it.
 # Also for aarch64 as the support is in upstream, but not packaged in Fedora.
+# Disable subtle crypto as we have an old libgcrypt in RHEL 7
 mkdir -p %{_target_platform}
 pushd %{_target_platform}
 %cmake \
@@ -343,19 +362,21 @@ pushd %{_target_platform}
 %endif
   -DENABLE_GTKDOC=ON \
   -DENABLE_MINIBROWSER=ON \
+  -DENABLE_SUBTLE_CRYPTO=OFF \
 %ifarch s390 aarch64
   -DUSE_LD_GOLD=OFF \
 %endif
 %ifarch s390 s390x ppc %{power64} aarch64 %{mips}
   -DENABLE_JIT=OFF \
-%endif
-%ifarch s390 s390x ppc %{power64} aarch64 %{mips}
   -DUSE_SYSTEM_MALLOC=ON \
 %endif
   ..
 popd
 
-make %{?_smp_mflags} -C %{_target_platform}
+# Remove the static amount of jobs once
+# https://projects.engineering.redhat.com/browse/BREW-2146 is resolved
+# make %{?_smp_mflags} -C %{_target_platform}
+make -j4 -C %{_target_platform}
 
 %install
 %if 0%{?bundle_icu}
@@ -382,14 +403,19 @@ chmod 644 $RPM_BUILD_ROOT%{_libdir}/webkit2gtk-4.0/libicuuc.so.57.1
 %add_to_license_files Source/JavaScriptCore/COPYING.LIB
 %add_to_license_files Source/JavaScriptCore/icu/LICENSE
 %add_to_license_files Source/ThirdParty/ANGLE/LICENSE
+%add_to_license_files Source/ThirdParty/ANGLE/src/common/third_party/smhasher/LICENSE
 %add_to_license_files Source/ThirdParty/ANGLE/src/third_party/compiler/LICENSE
-%add_to_license_files Source/ThirdParty/ANGLE/src/third_party/murmurhash/LICENSE
+%add_to_license_files Source/ThirdParty/ANGLE/src/third_party/libXNVCtrl/LICENSE
+%add_to_license_files Source/ThirdParty/brotli/LICENSE
+%add_to_license_files Source/ThirdParty/woff2/LICENSE
 %add_to_license_files Source/WebCore/icu/LICENSE
 %add_to_license_files Source/WebCore/LICENSE-APPLE
 %add_to_license_files Source/WebCore/LICENSE-LGPL-2
 %add_to_license_files Source/WebCore/LICENSE-LGPL-2.1
 %add_to_license_files Source/WebInspectorUI/UserInterface/External/CodeMirror/LICENSE
+%add_to_license_files Source/WebInspectorUI/UserInterface/External/ESLint/LICENSE
 %add_to_license_files Source/WebInspectorUI/UserInterface/External/Esprima/LICENSE
+%add_to_license_files Source/WebInspectorUI/UserInterface/External/three.js/LICENSE
 %add_to_license_files Source/WTF/icu/LICENSE
 %add_to_license_files Source/WTF/wtf/dtoa/COPYING
 %add_to_license_files Source/WTF/wtf/dtoa/LICENSE
@@ -405,6 +431,7 @@ chmod 644 $RPM_BUILD_ROOT%{_libdir}/webkit2gtk-4.0/libicuuc.so.57.1
 %license _license_files/*WebInspectorUI*
 %license _license_files/*WTF*
 %{_libdir}/libwebkit2gtk-4.0.so.*
+%dir %{_libdir}/girepository-1.0
 %{_libdir}/girepository-1.0/WebKit2-4.0.typelib
 %{_libdir}/girepository-1.0/WebKit2WebExtension-4.0.typelib
 %{_libdir}/webkit2gtk-4.0/
@@ -414,6 +441,7 @@ chmod 644 $RPM_BUILD_ROOT%{_libdir}/webkit2gtk-4.0/libicuuc.so.57.1
 %attr(0755,root,root) %{_libdir}/webkit2gtk-4.0/libicui18n.so.57.1
 %attr(0755,root,root) %{_libdir}/webkit2gtk-4.0/libicuuc.so.57.1
 %{_libexecdir}/webkit2gtk-4.0/
+%{_bindir}/WebKitWebDriver
 %exclude %{_libexecdir}/webkit2gtk-4.0/WebKitPluginProcess2
 
 %files devel
@@ -429,6 +457,7 @@ chmod 644 $RPM_BUILD_ROOT%{_libdir}/webkit2gtk-4.0/libicuuc.so.57.1
 %files jsc
 %license _license_files/*JavaScriptCore*
 %{_libdir}/libjavascriptcoregtk-4.0.so.*
+%dir %{_libdir}/girepository-1.0
 %{_libdir}/girepository-1.0/JavaScriptCore-4.0.typelib
 
 %files jsc-devel
@@ -437,6 +466,7 @@ chmod 644 $RPM_BUILD_ROOT%{_libdir}/webkit2gtk-4.0/libicuuc.so.57.1
 %{_includedir}/webkitgtk-4.0/JavaScriptCore/
 %{_libdir}/libjavascriptcoregtk-4.0.so
 %{_libdir}/pkgconfig/javascriptcoregtk-4.0.pc
+%dir %{_datadir}/gir-1.0
 %{_datadir}/gir-1.0/JavaScriptCore-4.0.gir
 
 %files plugin-process-gtk2
@@ -449,6 +479,49 @@ chmod 644 $RPM_BUILD_ROOT%{_libdir}/webkit2gtk-4.0/libicuuc.so.57.1
 %{_datadir}/gtk-doc/html/webkitdomgtk-4.0/
 
 %changelog
+* Tue Aug 14 2018 Tomas Popela <tpopela@redhat.com> - 2.20.5-1
+- Update to 2.20.5 - technically it was not necessary as the only difference
+  between 2.20.4 and .5 was the revert of one change, that we already reverted
+  while building 2.20.4. But it's better to stay with upstream.
+- Update the labels patch with the version that was pushed upstream.
+- Resolves: rhbz#1576544
+
+* Thu Aug 09 2018 Tomas Popela <tpopela@redhat.com> - 2.20.4-2
+- webkitgtk4: Crash on Google login page when a11y is active
+- Resolves: rhbz#1503624
+- Revert patch causing rendering glitches
+
+* Mon Aug 06 2018 Tomas Popela <tpopela@redhat.com> - 2.20.4-1
+- Update to 2.20.4
+- Resolves: rhbz#1576544
+- WebKitWebProcess crashes when a11y is active
+- Resolves: rhbz#1591638
+
+* Wed Jun 27 2018 Tomas Popela <tpopela@redhat.com> - 2.20.3-5
+- Add GStreamer coverity fixes
+- Resolves: rhbz#1576544
+
+* Tue Jun 26 2018 Tomas Popela <tpopela@redhat.com> - 2.20.3-4
+- More rpmdiff and covscan fixes
+- Resolves: rhbz#1576544
+
+* Wed Jun 13 2018 Tomas Popela <tpopela@redhat.com> - 2.20.3-3
+- Unbundle cmake
+- Add covscan fixes
+- Resolves: rhbz#1576544
+
+* Tue Jun 12 2018 Tomas Popela <tpopela@redhat.com> - 2.20.3-2
+- Fix the rpmdiff warning
+- Resolves: rhbz#1576544
+
+* Mon Jun 11 2018 Tomas Popela <tpopela@redhat.com> - 2.20.3-1
+- Update to 2.20.3
+- Resolves: rhbz#1576544
+
+* Fri Jun 08 2018 Tomas Popela <tpopela@redhat.com> - 2.20.2-1
+- Update to 2.20.2
+- Resolves: rhbz#1576544
+
 * Wed Nov 08 2017 Tomas Popela <tpopela@redhat.com> - 2.16.6-6
 - Don't strip debug info from bundled icu libraries, otherwise there
   will be conflicts between webkitgtk4-debuginfo and icu-debuginfo packages

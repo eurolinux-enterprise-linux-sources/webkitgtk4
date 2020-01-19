@@ -23,12 +23,12 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef ScrollableArea_h
-#define ScrollableArea_h
+#pragma once
 
 #include "ScrollSnapOffsetsInfo.h"
+#include "ScrollTypes.h"
 #include "Scrollbar.h"
-#include <wtf/Vector.h>
+#include <wtf/Forward.h>
 #include <wtf/WeakPtr.h>
 
 namespace WebCore {
@@ -51,7 +51,7 @@ typedef IntPoint ScrollOffset;
 class ScrollableArea {
 public:
     WEBCORE_EXPORT bool scroll(ScrollDirection, ScrollGranularity, float multiplier = 1);
-    WEBCORE_EXPORT void scrollToOffsetWithoutAnimation(const FloatPoint&);
+    WEBCORE_EXPORT void scrollToOffsetWithoutAnimation(const FloatPoint&, ScrollClamping = ScrollClamping::Clamped);
     void scrollToOffsetWithoutAnimation(ScrollbarOrientation, float offset);
 
     // Should be called when the scroll position changes externally, for example if the scroll layer position
@@ -65,7 +65,7 @@ public:
 
     WEBCORE_EXPORT bool handleWheelEvent(const PlatformWheelEvent&);
 
-    WeakPtr<ScrollableArea> createWeakPtr() { return m_weakPtrFactory.createWeakPtr(); }
+    WeakPtr<ScrollableArea> createWeakPtr() { return m_weakPtrFactory.createWeakPtr(*this); }
 
 #if ENABLE(CSS_SCROLL_SNAP)
     WEBCORE_EXPORT const Vector<LayoutUnit>* horizontalSnapOffsets() const;
@@ -89,12 +89,10 @@ public:
     void updateScrollSnapState();
 
 #if ENABLE(TOUCH_EVENTS)
-    virtual bool isTouchScrollable() const { return false; }
     virtual bool handleTouchEvent(const PlatformTouchEvent&);
 #endif
 
 #if PLATFORM(IOS)
-    virtual bool isOverflowScroll() const { return false; }
     virtual void didStartScroll() { }
     virtual void didEndScroll() { }
     virtual void didUpdateScroll() { }
@@ -355,7 +353,7 @@ private:
 
     mutable std::unique_ptr<ScrollAnimator> m_scrollAnimator;
 
-    WeakPtrFactory<ScrollableArea> m_weakPtrFactory { this };
+    WeakPtrFactory<ScrollableArea> m_weakPtrFactory;
 
 #if ENABLE(CSS_SCROLL_SNAP)
     std::unique_ptr<ScrollSnapOffsetsInfo<LayoutUnit>> m_snapOffsetsInfo;
@@ -391,4 +389,3 @@ private:
 
 } // namespace WebCore
 
-#endif // ScrollableArea_h

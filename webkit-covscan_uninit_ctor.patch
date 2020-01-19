@@ -1,0 +1,505 @@
+diff -up webkitgtk-2.20.3/Source/JavaScriptCore/b3/air/AirAllocateRegistersByGraphColoring.cpp.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/JavaScriptCore/b3/air/AirAllocateRegistersByGraphColoring.cpp
+--- webkitgtk-2.20.3/Source/JavaScriptCore/b3/air/AirAllocateRegistersByGraphColoring.cpp.covscan_fixes_uninit_ctor	2018-02-19 08:45:14.000000000 +0100
++++ webkitgtk-2.20.3/Source/JavaScriptCore/b3/air/AirAllocateRegistersByGraphColoring.cpp	2018-06-18 09:07:12.032744813 +0200
+@@ -876,7 +876,7 @@ protected:
+         }
+ 
+     private:
+-        unsigned m_positionInMoveList;
++        unsigned m_positionInMoveList { 0 };
+         Vector<unsigned, 0, UnsafeVectorOverflow> m_moveList;
+         Vector<unsigned, 0, UnsafeVectorOverflow> m_lowPriorityMoveList;
+     };
+diff -up webkitgtk-2.20.3/Source/JavaScriptCore/bytecode/PolymorphicAccess.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/JavaScriptCore/bytecode/PolymorphicAccess.h
+--- webkitgtk-2.20.3/Source/JavaScriptCore/bytecode/PolymorphicAccess.h.covscan_fixes_uninit_ctor	2018-02-19 08:45:14.000000000 +0100
++++ webkitgtk-2.20.3/Source/JavaScriptCore/bytecode/PolymorphicAccess.h	2018-06-18 09:07:12.034744805 +0200
+@@ -122,7 +122,7 @@ public:
+     }
+     
+ private:
+-    Kind m_kind;
++    Kind m_kind { MadeNoChanges };
+     MacroAssemblerCodePtr m_code;
+     Vector<std::pair<InlineWatchpointSet&, StringFireDetail>> m_watchpointsToFire;
+ };
+diff -up webkitgtk-2.20.3/Source/JavaScriptCore/dfg/DFGOSRExit.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/JavaScriptCore/dfg/DFGOSRExit.h
+--- webkitgtk-2.20.3/Source/JavaScriptCore/dfg/DFGOSRExit.h.covscan_fixes_uninit_ctor	2018-02-19 08:45:14.000000000 +0100
++++ webkitgtk-2.20.3/Source/JavaScriptCore/dfg/DFGOSRExit.h	2018-06-18 09:07:12.034744805 +0200
+@@ -131,7 +131,7 @@ struct OSRExitState : RefCounted<OSRExit
+     void* jumpTarget;
+     ArrayProfile* arrayProfile;
+ 
+-    ExtraInitializationLevel extraInitializationLevel;
++    ExtraInitializationLevel extraInitializationLevel { };
+     Profiler::OSRExit* profilerExit { nullptr };
+ };
+ 
+diff -up webkitgtk-2.20.3/Source/JavaScriptCore/runtime/ConfigFile.cpp.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/JavaScriptCore/runtime/ConfigFile.cpp
+--- webkitgtk-2.20.3/Source/JavaScriptCore/runtime/ConfigFile.cpp.covscan_fixes_uninit_ctor	2018-06-11 10:16:31.000000000 +0200
++++ webkitgtk-2.20.3/Source/JavaScriptCore/runtime/ConfigFile.cpp	2018-06-18 09:07:12.035744801 +0200
+@@ -233,7 +233,7 @@ private:
+ 
+     const char* m_filename;
+     unsigned m_lineNumber;
+-    FILE* m_file;
++    FILE* m_file { nullptr };
+     char m_buffer[BUFSIZ];
+     char* m_srcPtr;
+     char* m_bufferEnd;
+diff -up webkitgtk-2.20.3/Source/JavaScriptCore/runtime/JSBigInt.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/JavaScriptCore/runtime/JSBigInt.h
+--- webkitgtk-2.20.3/Source/JavaScriptCore/runtime/JSBigInt.h.covscan_fixes_uninit_ctor	2018-02-19 08:45:17.000000000 +0100
++++ webkitgtk-2.20.3/Source/JavaScriptCore/runtime/JSBigInt.h	2018-06-18 09:07:12.035744801 +0200
+@@ -84,7 +84,7 @@ public:
+     double toNumber(ExecState*) const;
+ 
+     JSObject* toObject(ExecState*, JSGlobalObject*) const;
+-    
++
+ private:
+     using Digit = uintptr_t;
+     static constexpr const int bitsPerByte = 8;
+@@ -92,15 +92,15 @@ private:
+     static constexpr const int halfDigitBits = digitBits / 2;
+     static constexpr const Digit halfDigitMask = (1ull << halfDigitBits) - 1;
+     static constexpr const int maxInt = 0x7FFFFFFF;
+-    
++
+     // The maximum length that the current implementation supports would be
+     // maxInt / digitBits. However, we use a lower limit for now, because
+     // raising it later is easier than lowering it.
+     // Support up to 1 million bits.
+     static const int maxLength = 1024 * 1024 / (sizeof(void*) * bitsPerByte);
+-    
++
+     static uint64_t calculateMaximumCharactersRequired(int length, int radix, Digit lastDigit, bool sign);
+-    
++
+     static void absoluteDivSmall(ExecState&, JSBigInt* x, Digit divisor, JSBigInt** quotient, Digit& remainder);
+     static void internalMultiplyAdd(JSBigInt* source, Digit factor, Digit summand, int, JSBigInt* result);
+ 
+@@ -126,15 +126,15 @@ private:
+     JSBigInt* rightTrim(VM&);
+ 
+     void inplaceMultiplyAdd(Digit multiplier, Digit part);
+-    
++
+     static size_t offsetOfData();
+     Digit* dataStorage();
+ 
+     Digit digit(int);
+     void setDigit(int, Digit);
+-        
+-    int m_length;
+-    bool m_sign;
++
++    int m_length { 0 };
++    bool m_sign { false };
+ };
+ 
+ inline JSBigInt* asBigInt(JSValue value)
+diff -up webkitgtk-2.20.3/Source/JavaScriptCore/runtime/PropertySlot.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/JavaScriptCore/runtime/PropertySlot.h
+--- webkitgtk-2.20.3/Source/JavaScriptCore/runtime/PropertySlot.h.covscan_fixes_uninit_ctor	2018-02-19 08:45:17.000000000 +0100
++++ webkitgtk-2.20.3/Source/JavaScriptCore/runtime/PropertySlot.h	2018-06-18 09:07:12.035744801 +0200
+@@ -368,7 +368,7 @@ private:
+     JS_EXPORT_PRIVATE JSValue customGetter(ExecState*, PropertyName) const;
+     JS_EXPORT_PRIVATE JSValue customAccessorGetter(ExecState*, PropertyName) const;
+ 
+-    unsigned m_attributes;
++    unsigned m_attributes { 0 };
+     union {
+         EncodedJSValue value;
+         struct {
+diff -up webkitgtk-2.20.3/Source/JavaScriptCore/wasm/js/WasmToJS.cpp.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/JavaScriptCore/wasm/js/WasmToJS.cpp
+--- webkitgtk-2.20.3/Source/JavaScriptCore/wasm/js/WasmToJS.cpp.covscan_fixes_uninit_ctor	2018-03-05 12:42:39.000000000 +0100
++++ webkitgtk-2.20.3/Source/JavaScriptCore/wasm/js/WasmToJS.cpp	2018-06-18 09:07:12.035744801 +0200
+@@ -264,7 +264,7 @@ Expected<MacroAssemblerCodeRef, BindingF
+                 JSValue result = call(exec, callee, callType, callData, jsUndefined(), args);
+                 RETURN_IF_EXCEPTION(throwScope, 0);
+ 
+-                uint64_t realResult;
++                uint64_t realResult = 0;
+                 switch (signature.returnType()) {
+                 case Func:
+                 case Anyfunc:
+diff -up webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmB3IRGenerator.cpp.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmB3IRGenerator.cpp
+--- webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmB3IRGenerator.cpp.covscan_fixes_uninit_ctor	2018-03-05 11:37:06.000000000 +0100
++++ webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmB3IRGenerator.cpp	2018-06-18 09:07:12.036744797 +0200
+@@ -147,10 +147,10 @@ public:
+ 
+     private:
+         friend class B3IRGenerator;
+-        BlockType blockType;
+-        BasicBlock* continuation;
+-        BasicBlock* special;
+-        ResultList result;
++        BlockType blockType { };
++        BasicBlock* continuation { nullptr };
++        BasicBlock* special { nullptr };
++        ResultList result { };
+     };
+ 
+     typedef Value* ExpressionType;
+diff -up webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmFormat.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmFormat.h
+--- webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmFormat.h.covscan_fixes_uninit_ctor	2018-02-19 08:45:17.000000000 +0100
++++ webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmFormat.h	2018-06-18 09:07:12.036744797 +0200
+@@ -226,7 +226,7 @@ public:
+     std::optional<uint32_t> maximum() const { return m_maximum; }
+ 
+ private:
+-    uint32_t m_initial;
++    uint32_t m_initial { 0 };
+     std::optional<uint32_t> m_maximum;
+     bool m_isImport { false };
+     bool m_isValid { false };
+diff -up webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmFunctionParser.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmFunctionParser.h
+--- webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmFunctionParser.h.covscan_fixes_uninit_ctor	2018-02-19 08:45:17.000000000 +0100
++++ webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmFunctionParser.h	2018-06-18 09:07:12.036744797 +0200
+@@ -87,7 +87,7 @@ private:
+     const Signature& m_signature;
+     const ModuleInformation& m_info;
+ 
+-    OpType m_currentOpcode;
++    OpType m_currentOpcode { };
+     size_t m_currentOpcodeStartingOffset { 0 };
+ 
+     unsigned m_unreachableBlocks { 0 };
+diff -up webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmTierUpCount.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmTierUpCount.h
+--- webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmTierUpCount.h.covscan_fixes_uninit_ctor	2018-02-19 08:45:17.000000000 +0100
++++ webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmTierUpCount.h	2018-06-18 09:07:12.037744793 +0200
+@@ -65,7 +65,7 @@ public:
+ 
+ private:
+     uint32_t m_count;
+-    Atomic<bool> m_tierUpStarted;
++    Atomic<bool> m_tierUpStarted { false };
+ };
+     
+ } } // namespace JSC::Wasm
+diff -up webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmValidate.cpp.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmValidate.cpp
+--- webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmValidate.cpp.covscan_fixes_uninit_ctor	2018-02-19 08:45:17.000000000 +0100
++++ webkitgtk-2.20.3/Source/JavaScriptCore/wasm/WasmValidate.cpp	2018-06-18 09:07:12.037744793 +0200
+@@ -72,8 +72,8 @@ public:
+         Type signature() const { return m_signature; }
+         Type branchTargetSignature() const { return type() == BlockType::Loop ? Void : signature(); }
+     private:
+-        BlockType m_blockType;
+-        Type m_signature;
++        BlockType m_blockType { };
++        Type m_signature { };
+     };
+     typedef String ErrorType;
+     typedef Unexpected<ErrorType> UnexpectedResult;
+diff -up webkitgtk-2.20.3/Source/JavaScriptCore/yarr/YarrJIT.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/JavaScriptCore/yarr/YarrJIT.h
+--- webkitgtk-2.20.3/Source/JavaScriptCore/yarr/YarrJIT.h.covscan_fixes_uninit_ctor	2018-02-20 10:12:50.000000000 +0100
++++ webkitgtk-2.20.3/Source/JavaScriptCore/yarr/YarrJIT.h	2018-06-18 09:07:12.037744793 +0200
+@@ -201,7 +201,7 @@ private:
+     MacroAssemblerCodeRef m_matchOnly8;
+     MacroAssemblerCodeRef m_matchOnly16;
+ #if ENABLE(YARR_JIT_ALL_PARENS_EXPRESSIONS)
+-    bool m_usesPatternContextBuffer;
++    bool m_usesPatternContextBuffer { false };
+ #endif
+     std::optional<JITFailureReason> m_failureReason;
+ };
+diff -up webkitgtk-2.20.3/Source/WebCore/accessibility/AccessibilityTableColumn.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/WebCore/accessibility/AccessibilityTableColumn.h
+--- webkitgtk-2.20.3/Source/WebCore/accessibility/AccessibilityTableColumn.h.covscan_fixes_uninit_ctor	2018-02-19 08:45:31.000000000 +0100
++++ webkitgtk-2.20.3/Source/WebCore/accessibility/AccessibilityTableColumn.h	2018-06-18 09:07:12.037744793 +0200
+@@ -33,36 +33,36 @@
+ #include "IntRect.h"
+ 
+ namespace WebCore {
+-    
++
+ class RenderTableSection;
+ 
+ class AccessibilityTableColumn final : public AccessibilityMockObject {
+ public:
+     static Ref<AccessibilityTableColumn> create();
+     virtual ~AccessibilityTableColumn();
+-    
++
+     AccessibilityObject* headerObject();
+-        
++
+     AccessibilityRole roleValue() const override { return AccessibilityRole::Column; }
+-    
++
+     void setColumnIndex(int columnIndex) { m_columnIndex = columnIndex; }
+-    int columnIndex() const { return m_columnIndex; }    
+-    
++    int columnIndex() const { return m_columnIndex; }
++
+     void addChildren() override;
+     void setParent(AccessibilityObject*) override;
+-    
++
+     LayoutRect elementRect() const override;
+-    
++
+ private:
+     AccessibilityTableColumn();
+-    
++
+     AccessibilityObject* headerObjectForSection(RenderTableSection*, bool thTagRequired);
+     bool computeAccessibilityIsIgnored() const override;
+     bool isTableColumn() const override { return true; }
+ 
+-    unsigned m_columnIndex;
++    unsigned m_columnIndex { 0 };
+ };
+ 
+-} // namespace WebCore 
++} // namespace WebCore
+ 
+ SPECIALIZE_TYPE_TRAITS_ACCESSIBILITY(AccessibilityTableColumn, isTableColumn())
+diff -up webkitgtk-2.20.3/Source/WebCore/dom/RequestAnimationFrameCallback.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/WebCore/dom/RequestAnimationFrameCallback.h
+--- webkitgtk-2.20.3/Source/WebCore/dom/RequestAnimationFrameCallback.h.covscan_fixes_uninit_ctor	2018-02-19 08:45:32.000000000 +0100
++++ webkitgtk-2.20.3/Source/WebCore/dom/RequestAnimationFrameCallback.h	2018-06-18 09:07:12.037744793 +0200
+@@ -42,9 +42,9 @@ public:
+ 
+     virtual CallbackResult<void> handleEvent(double highResTimeMs) = 0;
+ 
+-    int m_id;
+-    bool m_firedOrCancelled;
+-    bool m_useLegacyTimeBase;
++    int m_id { 0 };
++    bool m_firedOrCancelled { false };
++    bool m_useLegacyTimeBase { false };
+ };
+ 
+ } // namespace WebCore
+diff -up webkitgtk-2.20.3/Source/WebCore/html/HTMLMediaElement.cpp.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/WebCore/html/HTMLMediaElement.cpp
+--- webkitgtk-2.20.3/Source/WebCore/html/HTMLMediaElement.cpp.covscan_fixes_uninit_ctor	2018-02-19 12:04:38.000000000 +0100
++++ webkitgtk-2.20.3/Source/WebCore/html/HTMLMediaElement.cpp	2018-06-18 09:07:12.039744785 +0200
+@@ -2105,9 +2105,10 @@ bool HTMLMediaElement::isSafeToLoadURL(c
+ 
+     RefPtr<Frame> frame = document().frame();
+     if (!frame || !document().securityOrigin().canDisplay(url)) {
+-        if (actionIfInvalid == Complain)
++        if (actionIfInvalid == Complain) {
+             FrameLoader::reportLocalLoadFailed(frame.get(), url.stringCenterEllipsizedToLength());
+             ERROR_LOG(LOGIDENTIFIER, url , " was rejected by SecurityOrigin");
++        }
+         return false;
+     }
+ 
+diff -up webkitgtk-2.20.3/Source/WebCore/html/HTMLMenuElement.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/WebCore/html/HTMLMenuElement.h
+--- webkitgtk-2.20.3/Source/WebCore/html/HTMLMenuElement.h.covscan_fixes_uninit_ctor	2018-02-19 08:45:32.000000000 +0100
++++ webkitgtk-2.20.3/Source/WebCore/html/HTMLMenuElement.h	2018-06-18 09:07:12.039744785 +0200
+@@ -39,7 +39,7 @@ private:
+     void removedFromAncestor(RemovalType, ContainerNode&) final;
+     void parseAttribute(const QualifiedName&, const AtomicString&) final;
+ 
+-    bool m_isTouchBarMenu;
++    bool m_isTouchBarMenu { false };
+ };
+ 
+ } // namespace WebCore
+diff -up webkitgtk-2.20.3/Source/WebCore/Modules/webaudio/AudioProcessingEvent.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/WebCore/Modules/webaudio/AudioProcessingEvent.h
+--- webkitgtk-2.20.3/Source/WebCore/Modules/webaudio/AudioProcessingEvent.h.covscan_fixes_uninit_ctor	2018-02-19 08:45:31.000000000 +0100
++++ webkitgtk-2.20.3/Source/WebCore/Modules/webaudio/AudioProcessingEvent.h	2018-06-18 09:07:12.040744781 +0200
+@@ -58,7 +58,7 @@ private:
+ 
+     RefPtr<AudioBuffer> m_inputBuffer;
+     RefPtr<AudioBuffer> m_outputBuffer;
+-    double m_playbackTime;
++    double m_playbackTime { 0.0 };
+ };
+ 
+ } // namespace WebCore
+diff -up webkitgtk-2.20.3/Source/WebCore/Modules/webaudio/DelayDSPKernel.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/WebCore/Modules/webaudio/DelayDSPKernel.h
+--- webkitgtk-2.20.3/Source/WebCore/Modules/webaudio/DelayDSPKernel.h.covscan_fixes_uninit_ctor	2018-02-19 08:45:31.000000000 +0100
++++ webkitgtk-2.20.3/Source/WebCore/Modules/webaudio/DelayDSPKernel.h	2018-06-18 09:07:12.040744781 +0200
+@@ -31,17 +31,17 @@
+ namespace WebCore {
+ 
+ class DelayProcessor;
+-    
++
+ class DelayDSPKernel : public AudioDSPKernel {
+-public:  
++public:
+     explicit DelayDSPKernel(DelayProcessor*);
+     DelayDSPKernel(double maxDelayTime, float sampleRate);
+-    
++
+     void process(const float* source, float* destination, size_t framesToProcess) override;
+     void reset() override;
+-    
++
+     double maxDelayTime() const { return m_maxDelayTime; }
+-    
++
+     void setDelayFrames(double numberOfFrames) { m_desiredDelayFrames = numberOfFrames; }
+ 
+     double tailTime() const override;
+@@ -49,12 +49,12 @@ public:
+ 
+ private:
+     AudioFloatArray m_buffer;
+-    double m_maxDelayTime;
++    double m_maxDelayTime { 0.0 };
+     int m_writeIndex;
+-    double m_currentDelayTime;
+-    double m_smoothingRate;
++    double m_currentDelayTime { 0.0 };
++    double m_smoothingRate { 0.0 };
+     bool m_firstTime;
+-    double m_desiredDelayFrames;
++    double m_desiredDelayFrames { 0.0 };
+ 
+     AudioFloatArray m_delayTimes;
+ 
+diff -up webkitgtk-2.20.3/Source/WebCore/platform/graphics/ANGLEWebKitBridge.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/WebCore/platform/graphics/ANGLEWebKitBridge.h
+--- webkitgtk-2.20.3/Source/WebCore/platform/graphics/ANGLEWebKitBridge.h.covscan_fixes_uninit_ctor	2018-02-19 08:45:32.000000000 +0100
++++ webkitgtk-2.20.3/Source/WebCore/platform/graphics/ANGLEWebKitBridge.h	2018-06-18 09:07:12.040744781 +0200
+@@ -85,7 +85,7 @@ private:
+     ShShaderOutput m_shaderOutput;
+     ShShaderSpec m_shaderSpec;
+ 
+-    ShBuiltInResources m_resources;
++    ShBuiltInResources m_resources { };
+ };
+ 
+ } // namespace WebCore
+diff -up webkitgtk-2.20.3/Source/WebCore/platform/graphics/texmap/TextureMapperPlatformLayerBuffer.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/WebCore/platform/graphics/texmap/TextureMapperPlatformLayerBuffer.h
+--- webkitgtk-2.20.3/Source/WebCore/platform/graphics/texmap/TextureMapperPlatformLayerBuffer.h.covscan_fixes_uninit_ctor	2018-02-19 08:45:32.000000000 +0100
++++ webkitgtk-2.20.3/Source/WebCore/platform/graphics/texmap/TextureMapperPlatformLayerBuffer.h	2018-06-18 09:07:12.040744781 +0200
+@@ -72,7 +72,7 @@ private:
+ 
+     GLuint m_textureID;
+     IntSize m_size;
+-    GLint m_internalFormat;
++    GLint m_internalFormat { 0 };
+     TextureMapperGL::Flags m_extraFlags;
+     bool m_hasManagedTexture;
+     std::unique_ptr<UnmanagedBufferDataHolder> m_unmanagedBufferDataHolder;
+diff -up webkitgtk-2.20.3/Source/WebCore/platform/gtk/ScrollbarThemeGtk.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/WebCore/platform/gtk/ScrollbarThemeGtk.h
+--- webkitgtk-2.20.3/Source/WebCore/platform/gtk/ScrollbarThemeGtk.h.covscan_fixes_uninit_ctor	2018-02-19 08:45:32.000000000 +0100
++++ webkitgtk-2.20.3/Source/WebCore/platform/gtk/ScrollbarThemeGtk.h	2018-06-18 09:07:12.041744777 +0200
+@@ -61,10 +61,10 @@ public:
+ private:
+     void updateThemeProperties();
+ 
+-    bool m_hasForwardButtonStartPart : 1;
+-    bool m_hasForwardButtonEndPart : 1;
+-    bool m_hasBackButtonStartPart : 1;
+-    bool m_hasBackButtonEndPart : 1;
++    bool m_hasForwardButtonStartPart { true };
++    bool m_hasForwardButtonEndPart { true };
++    bool m_hasBackButtonStartPart { true };
++    bool m_hasBackButtonEndPart { true };
+     bool m_usesOverlayScrollbars { false };
+ #endif // GTK_API_VERSION_2
+ };
+diff -up webkitgtk-2.20.3/Source/WebCore/platform/image-decoders/jpeg/JPEGImageDecoder.cpp.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/WebCore/platform/image-decoders/jpeg/JPEGImageDecoder.cpp
+--- webkitgtk-2.20.3/Source/WebCore/platform/image-decoders/jpeg/JPEGImageDecoder.cpp.covscan_fixes_uninit_ctor	2018-02-19 08:45:32.000000000 +0100
++++ webkitgtk-2.20.3/Source/WebCore/platform/image-decoders/jpeg/JPEGImageDecoder.cpp	2018-06-18 09:07:12.042744773 +0200
+@@ -454,10 +454,10 @@ private:
+     JPEGImageDecoder* m_decoder;
+     unsigned m_bufferLength;
+     int m_bytesToSkip;
+-    bool m_decodingSizeOnly;
++    bool m_decodingSizeOnly { false };
+ 
+     jpeg_decompress_struct m_info;
+-    decoder_error_mgr m_err;
++    decoder_error_mgr m_err { };
+     jstate m_state;
+ 
+     JSAMPARRAY m_samples;
+diff -up webkitgtk-2.20.3/Source/WebCore/platform/text/TextCodecUTF16.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/WebCore/platform/text/TextCodecUTF16.h
+--- webkitgtk-2.20.3/Source/WebCore/platform/text/TextCodecUTF16.h.covscan_fixes_uninit_ctor	2018-02-19 08:45:32.000000000 +0100
++++ webkitgtk-2.20.3/Source/WebCore/platform/text/TextCodecUTF16.h	2018-06-18 09:07:12.042744773 +0200
+@@ -42,7 +42,7 @@ private:
+ 
+     bool m_littleEndian;
+     bool m_haveBufferedByte { false };
+-    unsigned char m_bufferedByte;
++    unsigned char m_bufferedByte { 0 };
+ };
+ 
+ } // namespace WebCore
+diff -up webkitgtk-2.20.3/Source/WebCore/platform/URL.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/WebCore/platform/URL.h
+--- webkitgtk-2.20.3/Source/WebCore/platform/URL.h.covscan_fixes_uninit_ctor	2018-04-09 13:02:14.000000000 +0200
++++ webkitgtk-2.20.3/Source/WebCore/platform/URL.h	2018-06-18 09:07:12.043744769 +0200
+@@ -218,19 +218,19 @@ private:
+     bool hasPath() const;
+ 
+     String m_string;
+-    bool m_isValid : 1;
+-    bool m_protocolIsInHTTPFamily : 1;
+-    bool m_cannotBeABaseURL : 1;
++    bool m_isValid { true };
++    bool m_protocolIsInHTTPFamily { true };
++    bool m_cannotBeABaseURL { true };
+ 
+-    unsigned m_schemeEnd;
+-    unsigned m_userStart;
+-    unsigned m_userEnd;
+-    unsigned m_passwordEnd;
+-    unsigned m_hostEnd;
+-    unsigned m_portEnd;
+-    unsigned m_pathAfterLastSlash;
+-    unsigned m_pathEnd;
+-    unsigned m_queryEnd;
++    unsigned m_schemeEnd { 0 };
++    unsigned m_userStart { 0 };
++    unsigned m_userEnd { 0 };
++    unsigned m_passwordEnd { 0 };
++    unsigned m_hostEnd { 0 };
++    unsigned m_portEnd { 0 };
++    unsigned m_pathAfterLastSlash { 0 };
++    unsigned m_pathEnd { 0 };
++    unsigned m_queryEnd { 0 };
+ };
+ 
+ template <class Encoder>
+diff -up webkitgtk-2.20.3/Source/WebCore/rendering/RenderFragmentedFlow.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/WebCore/rendering/RenderFragmentedFlow.h
+--- webkitgtk-2.20.3/Source/WebCore/rendering/RenderFragmentedFlow.h.covscan_fixes_uninit_ctor	2018-02-26 17:00:31.000000000 +0100
++++ webkitgtk-2.20.3/Source/WebCore/rendering/RenderFragmentedFlow.h	2018-06-18 09:07:12.043744769 +0200
+@@ -231,7 +231,7 @@ protected:
+     private:
+         WeakPtr<RenderFragmentContainer> m_startFragment;
+         WeakPtr<RenderFragmentContainer> m_endFragment;
+-        bool m_rangeInvalidated;
++        bool m_rangeInvalidated { false };
+     };
+ 
+     typedef PODInterval<LayoutUnit, RenderFragmentContainer*> FragmentInterval;
+diff -up webkitgtk-2.20.3/Source/WebKit/NetworkProcess/NetworkProcessCreationParameters.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/WebKit/NetworkProcess/NetworkProcessCreationParameters.h
+--- webkitgtk-2.20.3/Source/WebKit/NetworkProcess/NetworkProcessCreationParameters.h.covscan_fixes_uninit_ctor	2018-02-19 08:45:32.000000000 +0100
++++ webkitgtk-2.20.3/Source/WebKit/NetworkProcess/NetworkProcessCreationParameters.h	2018-06-18 09:07:12.043744769 +0200
+@@ -58,7 +58,7 @@ struct NetworkProcessCreationParameters
+     bool canHandleHTTPSServerTrustEvaluation { true };
+ 
+     String cacheStorageDirectory;
+-    uint64_t cacheStoragePerOriginQuota;
++    uint64_t cacheStoragePerOriginQuota { 0 };
+     SandboxExtension::Handle cacheStorageDirectoryExtensionHandle;
+     String diskCacheDirectory;
+     SandboxExtension::Handle diskCacheDirectoryExtensionHandle;
+diff -up webkitgtk-2.20.3/Source/WebKit/Shared/Plugins/PluginProcessCreationParameters.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/WebKit/Shared/Plugins/PluginProcessCreationParameters.h
+--- webkitgtk-2.20.3/Source/WebKit/Shared/Plugins/PluginProcessCreationParameters.h.covscan_fixes_uninit_ctor	2018-02-19 08:45:32.000000000 +0100
++++ webkitgtk-2.20.3/Source/WebKit/Shared/Plugins/PluginProcessCreationParameters.h	2018-06-18 09:07:12.045744761 +0200
+@@ -49,7 +49,7 @@ struct PluginProcessCreationParameters {
+     void encode(IPC::Encoder&) const;
+     static bool decode(IPC::Decoder&, PluginProcessCreationParameters&);
+ 
+-    PluginProcessType processType;
++    PluginProcessType processType { PluginProcessTypeNormal };
+     bool supportsAsynchronousPluginInitialization;
+ 
+     Seconds minimumLifetime;
+diff -up webkitgtk-2.20.3/Source/WebKit/UIProcess/API/glib/IconDatabase.h.covscan_fixes_uninit_ctor webkitgtk-2.20.3/Source/WebKit/UIProcess/API/glib/IconDatabase.h
+--- webkitgtk-2.20.3/Source/WebKit/UIProcess/API/glib/IconDatabase.h.covscan_fixes_uninit_ctor	2018-02-19 08:45:33.000000000 +0100
++++ webkitgtk-2.20.3/Source/WebKit/UIProcess/API/glib/IconDatabase.h	2018-06-18 09:07:12.050744740 +0200
+@@ -226,7 +226,7 @@ private:
+ 
+         Deque<Function<void()>> m_notificationQueue;
+         Lock m_notificationQueueLock;
+-        Atomic<bool> m_isActive;
++        Atomic<bool> m_isActive { false };
+         RunLoop::Timer<MainThreadNotifier> m_timer;
+     };
+ 

@@ -31,7 +31,6 @@
 #include "HTMLNames.h"
 #include "SelectorPseudoTypeMap.h"
 #include <wtf/Assertions.h>
-#include <wtf/HashMap.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/Vector.h>
 #include <wtf/text/AtomicStringHash.h>
@@ -141,7 +140,7 @@ static unsigned simpleSelectorSpecificityInternal(const CSSSelector& simpleSelec
     case CSSSelector::End:
         return static_cast<unsigned>(SelectorSpecificityIncrement::ClassB);
     case CSSSelector::Tag:
-        return (simpleSelector.tagQName().localName() != starAtom) ? static_cast<unsigned>(SelectorSpecificityIncrement::ClassC) : 0;
+        return (simpleSelector.tagQName().localName() != starAtom()) ? static_cast<unsigned>(SelectorSpecificityIncrement::ClassC) : 0;
     case CSSSelector::PseudoElement:
         return static_cast<unsigned>(SelectorSpecificityIncrement::ClassC);
     case CSSSelector::Unknown:
@@ -247,7 +246,7 @@ unsigned CSSSelector::specificityForPage() const
     for (const CSSSelector* component = this; component; component = component->tagHistory()) {
         switch (component->match()) {
         case Tag:
-            s += tagQName().localName() == starAtom ? 0 : 4;
+            s += tagQName().localName() == starAtom() ? 0 : 4;
             break;
         case PagePseudoClass:
             switch (component->pagePseudoClassType()) {
@@ -276,6 +275,8 @@ PseudoId CSSSelector::pseudoId(PseudoElementType type)
         return FIRST_LETTER;
     case PseudoElementSelection:
         return SELECTION;
+    case PseudoElementMarker:
+        return MARKER;
     case PseudoElementBefore:
         return BEFORE;
     case PseudoElementAfter:
@@ -432,6 +433,9 @@ String CSSSelector::selectorText(const String& rightSide) const
                 break;
             case CSSSelector::PseudoClassAutofill:
                 str.appendLiteral(":-webkit-autofill");
+                break;
+            case CSSSelector::PseudoClassAutofillStrongPassword:
+                str.appendLiteral(":-webkit-autofill-strong-password");
                 break;
             case CSSSelector::PseudoClassDrag:
                 str.appendLiteral(":-webkit-drag");
@@ -732,10 +736,6 @@ String CSSSelector::selectorText(const String& rightSide) const
             return tagHistory->selectorText(" + " + str.toString() + rightSide);
         case CSSSelector::IndirectAdjacent:
             return tagHistory->selectorText(" ~ " + str.toString() + rightSide);
-#if ENABLE(CSS_SELECTORS_LEVEL4)
-        case CSSSelector::DescendantDoubleChild:
-            return tagHistory->selectorText(" >> " + str.toString() + rightSide);
-#endif
         case CSSSelector::Subselector:
             ASSERT_NOT_REACHED();
 #if ASSERT_DISABLED
@@ -827,13 +827,11 @@ CSSSelector::RareData::RareData(AtomicString&& value)
     , m_a(0)
     , m_b(0)
     , m_attribute(anyQName())
-    , m_argument(nullAtom)
+    , m_argument(nullAtom())
 {
 }
 
-CSSSelector::RareData::~RareData()
-{
-}
+CSSSelector::RareData::~RareData() = default;
 
 // a helper function for parsing nth-arguments
 bool CSSSelector::RareData::parseNth()

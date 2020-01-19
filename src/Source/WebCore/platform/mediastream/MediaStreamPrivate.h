@@ -44,23 +44,20 @@
 #include <wtf/MediaTime.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
+#include <wtf/UUID.h>
 #include <wtf/Vector.h>
 #include <wtf/WeakPtr.h>
-
-#if USE(GSTREAMER)
-#include "GRefPtrGStreamer.h"
-#include <owr/owr_gst_video_renderer.h>
-#endif
 
 namespace WebCore {
 
 class MediaStream;
+class OrientationNotifier;
 
 class MediaStreamPrivate : public MediaStreamTrackPrivate::Observer, public RefCounted<MediaStreamPrivate> {
 public:
     class Observer {
     public:
-        virtual ~Observer() { }
+        virtual ~Observer() = default;
 
         virtual void characteristicsChanged() { }
         virtual void activeStatusChanged() { }
@@ -69,7 +66,7 @@ public:
     };
 
     static Ref<MediaStreamPrivate> create(const Vector<Ref<RealtimeMediaSource>>& audioSources, const Vector<Ref<RealtimeMediaSource>>& videoSources);
-    static Ref<MediaStreamPrivate> create(const MediaStreamTrackPrivateVector&);
+    static Ref<MediaStreamPrivate> create(const MediaStreamTrackPrivateVector& tracks, String&& id = createCanonicalUUIDString()) { return adoptRef(*new MediaStreamPrivate(tracks, WTFMove(id))); }
 
     virtual ~MediaStreamPrivate();
 
@@ -93,34 +90,27 @@ public:
     void stopProducingData();
     bool isProducingData() const;
 
-    RefPtr<Image> currentFrameImage();
-    void paintCurrentFrameInContext(GraphicsContext&, const FloatRect&);
+    void endStream();
 
     bool hasVideo() const;
     bool hasAudio() const;
     bool muted() const;
 
-    bool hasLocalVideoSource() const;
-    bool hasLocalAudioSource() const;
+    bool hasCaptureVideoSource() const;
+    bool hasCaptureAudioSource() const;
+    void setCaptureTracksMuted(bool);
 
     FloatSize intrinsicSize() const;
 
-    WeakPtr<MediaStreamPrivate> createWeakPtr() { return m_weakPtrFactory.createWeakPtr(); }
+    WeakPtr<MediaStreamPrivate> createWeakPtr() { return m_weakPtrFactory.createWeakPtr(*this); }
 
-#if USE(GSTREAMER)
-    void setVideoRenderer(OwrGstVideoRenderer* renderer, GstElement* sink) { m_gstVideoRenderer = renderer; m_gstVideoSinkElement = sink; }
-    GRefPtr<GstElement> getVideoSinkElement() const { return m_gstVideoSinkElement; }
-    GRefPtr<OwrGstVideoRenderer> getVideoRenderer() const { return m_gstVideoRenderer; }
+    void monitorOrientation(OrientationNotifier&);
 
 private:
-    GRefPtr<GstElement> m_gstVideoSinkElement;
-    GRefPtr<OwrGstVideoRenderer> m_gstVideoRenderer;
-#endif
-
-private:
-    MediaStreamPrivate(const String&, const MediaStreamTrackPrivateVector&);
+    MediaStreamPrivate(const MediaStreamTrackPrivateVector&, String&&);
 
     // MediaStreamTrackPrivate::Observer
+    void trackStarted(MediaStreamTrackPrivate&) override;
     void trackEnded(MediaStreamTrackPrivate&) override;
     void trackMutedChanged(MediaStreamTrackPrivate&) override;
     void trackSettingsChanged(MediaStreamTrackPrivate&) override;

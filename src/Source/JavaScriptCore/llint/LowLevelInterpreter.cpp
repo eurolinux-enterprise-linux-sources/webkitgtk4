@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012, 2014, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -333,8 +333,27 @@ JSValue CLoop::execute(OpcodeID entryOpcodeID, void* executableAddress, VM* vm, 
 #endif
     CLoopDoubleRegister d0, d1;
 
+    struct StackPointerScope {
+        StackPointerScope(CLoopStack& stack)
+            : m_stack(stack)
+            , m_originalStackPointer(stack.currentStackPointer())
+        { }
+
+        ~StackPointerScope()
+        {
+            m_stack.setCurrentStackPointer(m_originalStackPointer);
+        }
+
+    private:
+        CLoopStack& m_stack;
+        void* m_originalStackPointer;
+    };
+
+    CLoopStack& cloopStack = vm->interpreter->cloopStack();
+    StackPointerScope stackPointerScope(cloopStack);
+
     lr.opcode = getOpcode(llint_return_to_host);
-    sp.vp = vm->interpreter->cloopStack().topOfStack() + 1;
+    sp.vp = cloopStack.currentStackPointer();
     cfr.callFrame = vm->topCallFrame;
 #ifndef NDEBUG
     void* startSP = sp.vp;
@@ -497,7 +516,16 @@ JSValue CLoop::execute(OpcodeID entryOpcodeID, void* executableAddress, VM* vm, 
 #define OFFLINE_ASM_BEGIN   asm (
 #define OFFLINE_ASM_END     );
 
-#define OFFLINE_ASM_OPCODE_LABEL(__opcode) OFFLINE_ASM_LOCAL_LABEL(llint_##__opcode)
+#if USE(LLINT_EMBEDDED_OPCODE_ID)
+#define EMBED_OPCODE_ID_IF_NEEDED(__opcode) ".int " __opcode##_value_string "\n"
+#else
+#define EMBED_OPCODE_ID_IF_NEEDED(__opcode)
+#endif
+
+#define OFFLINE_ASM_OPCODE_LABEL(__opcode) \
+    EMBED_OPCODE_ID_IF_NEEDED(__opcode) \
+    OFFLINE_ASM_LOCAL_LABEL(llint_##__opcode)
+
 #define OFFLINE_ASM_GLUE_LABEL(__opcode)   OFFLINE_ASM_LOCAL_LABEL(__opcode)
 
 #if CPU(ARM_THUMB2)

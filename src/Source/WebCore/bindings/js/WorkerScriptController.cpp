@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2016 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008-2017 Apple Inc. All Rights Reserved.
  * Copyright (C) 2011, 2012 Google Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,21 +30,22 @@
 #include "JSDOMBinding.h"
 #include "JSDedicatedWorkerGlobalScope.h"
 #include "JSEventTarget.h"
+#include "JSServiceWorkerGlobalScope.h"
 #include "ScriptSourceCode.h"
 #include "WebCoreJSClientData.h"
 #include "WorkerConsoleClient.h"
 #include "WorkerGlobalScope.h"
-#include <bindings/ScriptValue.h>
-#include <heap/StrongInlines.h>
-#include <runtime/Completion.h>
-#include <runtime/Exception.h>
-#include <runtime/ExceptionHelpers.h>
-#include <runtime/JSLock.h>
-#include <runtime/Watchdog.h>
-
-using namespace JSC;
+#include <JavaScriptCore/Completion.h>
+#include <JavaScriptCore/Exception.h>
+#include <JavaScriptCore/ExceptionHelpers.h>
+#include <JavaScriptCore/GCActivityCallback.h>
+#include <JavaScriptCore/JSLock.h>
+#include <JavaScriptCore/PromiseDeferredTimer.h>
+#include <JavaScriptCore/ScriptValue.h>
+#include <JavaScriptCore/StrongInlines.h>
 
 namespace WebCore {
+using namespace JSC;
 
 WorkerScriptController::WorkerScriptController(WorkerGlobalScope* workerGlobalScope)
     : m_vm(VM::create())
@@ -52,7 +53,6 @@ WorkerScriptController::WorkerScriptController(WorkerGlobalScope* workerGlobalSc
     , m_workerGlobalScopeWrapper(*m_vm)
 {
     m_vm->heap.acquireAccess(); // It's not clear that we have good discipline for heap access, so turn it on permanently.
-    m_vm->ensureWatchdog();
     JSVMClientData::initNormalWorld(m_vm.get());
 }
 
@@ -60,6 +60,7 @@ WorkerScriptController::~WorkerScriptController()
 {
     JSLockHolder lock(vm());
     if (m_workerGlobalScopeWrapper) {
+        m_workerGlobalScopeWrapper->clearDOMGuardedObjects();
         m_workerGlobalScopeWrapper->setConsoleClient(nullptr);
         m_consoleClient = nullptr;
     }
@@ -88,32 +89,51 @@ void WorkerScriptController::initScript()
         ASSERT(structure->globalObject() == m_workerGlobalScopeWrapper);
         ASSERT(m_workerGlobalScopeWrapper->structure()->globalObject() == m_workerGlobalScopeWrapper);
         dedicatedContextPrototype->structure()->setGlobalObject(*m_vm, m_workerGlobalScopeWrapper.get());
-        dedicatedContextPrototype->structure()->setPrototypeWithoutTransition(*m_vm, JSWorkerGlobalScope::prototype(*m_vm, m_workerGlobalScopeWrapper.get()));
+        dedicatedContextPrototype->structure()->setPrototypeWithoutTransition(*m_vm, JSWorkerGlobalScope::prototype(*m_vm, *m_workerGlobalScopeWrapper.get()));
 
         proxy->setTarget(*m_vm, m_workerGlobalScopeWrapper.get());
         proxy->structure()->setGlobalObject(*m_vm, m_workerGlobalScopeWrapper.get());
+#if ENABLE(SERVICE_WORKER)
+    } else if (m_workerGlobalScope->isServiceWorkerGlobalScope()) {
+        Structure* contextPrototypeStructure = JSServiceWorkerGlobalScopePrototype::createStructure(*m_vm, nullptr, jsNull());
+        Strong<JSServiceWorkerGlobalScopePrototype> contextPrototype(*m_vm, JSServiceWorkerGlobalScopePrototype::create(*m_vm, nullptr, contextPrototypeStructure));
+        Structure* structure = JSServiceWorkerGlobalScope::createStructure(*m_vm, nullptr, contextPrototype.get());
+        auto* proxyStructure = JSProxy::createStructure(*m_vm, nullptr, jsNull(), PureForwardingProxyType);
+        auto* proxy = JSProxy::create(*m_vm, proxyStructure);
+    
+        m_workerGlobalScopeWrapper.set(*m_vm, JSServiceWorkerGlobalScope::create(*m_vm, structure, static_cast<ServiceWorkerGlobalScope&>(*m_workerGlobalScope), proxy));
+        contextPrototypeStructure->setGlobalObject(*m_vm, m_workerGlobalScopeWrapper.get());
+        ASSERT(structure->globalObject() == m_workerGlobalScopeWrapper);
+        ASSERT(m_workerGlobalScopeWrapper->structure()->globalObject() == m_workerGlobalScopeWrapper);
+        contextPrototype->structure()->setGlobalObject(*m_vm, m_workerGlobalScopeWrapper.get());
+        contextPrototype->structure()->setPrototypeWithoutTransition(*m_vm, JSWorkerGlobalScope::prototype(*m_vm, *m_workerGlobalScopeWrapper.get()));
+
+        proxy->setTarget(*m_vm, m_workerGlobalScopeWrapper.get());
+        proxy->structure()->setGlobalObject(*m_vm, m_workerGlobalScopeWrapper.get());
+#endif
     }
+    
     ASSERT(m_workerGlobalScopeWrapper->globalObject() == m_workerGlobalScopeWrapper);
-    ASSERT(asObject(m_workerGlobalScopeWrapper->getPrototypeDirect())->globalObject() == m_workerGlobalScopeWrapper);
+    ASSERT(asObject(m_workerGlobalScopeWrapper->getPrototypeDirect(*m_vm))->globalObject() == m_workerGlobalScopeWrapper);
 
     m_consoleClient = std::make_unique<WorkerConsoleClient>(*m_workerGlobalScope);
     m_workerGlobalScopeWrapper->setConsoleClient(m_consoleClient.get());
 }
 
-void WorkerScriptController::evaluate(const ScriptSourceCode& sourceCode)
+void WorkerScriptController::evaluate(const ScriptSourceCode& sourceCode, String* returnedExceptionMessage)
 {
     if (isExecutionForbidden())
         return;
 
     NakedPtr<JSC::Exception> exception;
-    evaluate(sourceCode, exception);
+    evaluate(sourceCode, exception, returnedExceptionMessage);
     if (exception) {
         JSLockHolder lock(vm());
         reportException(m_workerGlobalScopeWrapper->globalExec(), exception);
     }
 }
 
-void WorkerScriptController::evaluate(const ScriptSourceCode& sourceCode, NakedPtr<JSC::Exception>& returnedException)
+void WorkerScriptController::evaluate(const ScriptSourceCode& sourceCode, NakedPtr<JSC::Exception>& returnedException, String* returnedExceptionMessage)
 {
     if (isExecutionForbidden())
         return;
@@ -132,13 +152,15 @@ void WorkerScriptController::evaluate(const ScriptSourceCode& sourceCode, NakedP
     }
 
     if (returnedException) {
-        String errorMessage;
+        String errorMessage = returnedException->value().toWTFString(exec);
         int lineNumber = 0;
         int columnNumber = 0;
         String sourceURL = sourceCode.url().string();
         JSC::Strong<JSC::Unknown> error;
         if (m_workerGlobalScope->sanitizeScriptError(errorMessage, lineNumber, columnNumber, sourceURL, error, sourceCode.cachedScript()))
             returnedException = JSC::Exception::create(vm, createError(exec, errorMessage.impl()));
+        if (returnedExceptionMessage)
+            *returnedExceptionMessage = errorMessage;
     }
 }
 
@@ -152,14 +174,17 @@ void WorkerScriptController::setException(JSC::Exception* exception)
 
 void WorkerScriptController::scheduleExecutionTermination()
 {
-    // The mutex provides a memory barrier to ensure that once
-    // termination is scheduled, isTerminatingExecution() will
-    // accurately reflect that state when called from another thread.
-    LockHolder locker(m_scheduledTerminationMutex);
-    m_isTerminatingExecution = true;
+    if (m_isTerminatingExecution)
+        return;
 
-    ASSERT(m_vm->watchdog());
-    m_vm->watchdog()->terminateSoon();
+    {
+        // The mutex provides a memory barrier to ensure that once
+        // termination is scheduled, isTerminatingExecution() will
+        // accurately reflect that state when called from another thread.
+        LockHolder locker(m_scheduledTerminationMutex);
+        m_isTerminatingExecution = true;
+    }
+    m_vm->notifyNeedTermination();
 }
 
 bool WorkerScriptController::isTerminatingExecution() const
@@ -184,9 +209,17 @@ bool WorkerScriptController::isExecutionForbidden() const
 void WorkerScriptController::disableEval(const String& errorMessage)
 {
     initScriptIfNeeded();
-    JSLockHolder lock(vm());
+    JSLockHolder lock{vm()};
 
     m_workerGlobalScopeWrapper->setEvalEnabled(false, errorMessage);
+}
+
+void WorkerScriptController::disableWebAssembly(const String& errorMessage)
+{
+    initScriptIfNeeded();
+    JSLockHolder lock{vm()};
+
+    m_workerGlobalScopeWrapper->setWebAssemblyEnabled(false, errorMessage);
 }
 
 void WorkerScriptController::releaseHeapAccess()
@@ -197,6 +230,32 @@ void WorkerScriptController::releaseHeapAccess()
 void WorkerScriptController::acquireHeapAccess()
 {
     m_vm->heap.acquireAccess();
+}
+
+void WorkerScriptController::addTimerSetNotification(JSC::JSRunLoopTimer::TimerNotificationCallback callback)
+{
+    auto processTimer = [&] (JSRunLoopTimer* timer) {
+        if (!timer)
+            return;
+        timer->addTimerSetNotification(callback);
+    };
+
+    processTimer(m_vm->heap.fullActivityCallback());
+    processTimer(m_vm->heap.edenActivityCallback());
+    processTimer(m_vm->promiseDeferredTimer.get());
+}
+
+void WorkerScriptController::removeTimerSetNotification(JSC::JSRunLoopTimer::TimerNotificationCallback callback)
+{
+    auto processTimer = [&] (JSRunLoopTimer* timer) {
+        if (!timer)
+            return;
+        timer->removeTimerSetNotification(callback);
+    };
+
+    processTimer(m_vm->heap.fullActivityCallback());
+    processTimer(m_vm->heap.edenActivityCallback());
+    processTimer(m_vm->promiseDeferredTimer.get());
 }
 
 void WorkerScriptController::attachDebugger(JSC::Debugger* debugger)

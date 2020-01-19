@@ -45,10 +45,10 @@ public:
     AudioFileReader(const void* data, size_t dataSize);
     ~AudioFileReader();
 
-    PassRefPtr<AudioBus> createBus(float sampleRate, bool mixToMono);
+    RefPtr<AudioBus> createBus(float sampleRate, bool mixToMono);
 
 private:
-    WeakPtr<AudioFileReader> createWeakPtr() { return m_weakPtrFactory.createWeakPtr(); }
+    WeakPtr<AudioFileReader> createWeakPtr() { return m_weakPtrFactory.createWeakPtr(*this); }
 
     static void deinterleavePadAddedCallback(AudioFileReader*, GstPad*);
     static void deinterleaveReadyCallback(AudioFileReader*);
@@ -108,15 +108,13 @@ void AudioFileReader::decodebinPadAddedCallback(AudioFileReader* reader, GstPad*
 }
 
 AudioFileReader::AudioFileReader(const char* filePath)
-    : m_weakPtrFactory(this)
-    , m_runLoop(RunLoop::current())
+    : m_runLoop(RunLoop::current())
     , m_filePath(filePath)
 {
 }
 
 AudioFileReader::AudioFileReader(const void* data, size_t dataSize)
-    : m_weakPtrFactory(this)
-    , m_runLoop(RunLoop::current())
+    : m_runLoop(RunLoop::current())
     , m_data(data)
     , m_dataSize(dataSize)
 {
@@ -338,7 +336,7 @@ void AudioFileReader::decodeAudioForBusCreation()
     }
 }
 
-PassRefPtr<AudioBus> AudioFileReader::createBus(float sampleRate, bool mixToMono)
+RefPtr<AudioBus> AudioFileReader::createBus(float sampleRate, bool mixToMono)
 {
     m_sampleRate = sampleRate;
     m_channels = mixToMono ? 1 : 2;
@@ -367,23 +365,23 @@ PassRefPtr<AudioBus> AudioFileReader::createBus(float sampleRate, bool mixToMono
     return audioBus;
 }
 
-PassRefPtr<AudioBus> createBusFromAudioFile(const char* filePath, bool mixToMono, float sampleRate)
+RefPtr<AudioBus> createBusFromAudioFile(const char* filePath, bool mixToMono, float sampleRate)
 {
     RefPtr<AudioBus> returnValue;
-    auto threadID = createThread("AudioFileReader", [&returnValue, filePath, mixToMono, sampleRate] {
+    auto thread = Thread::create("AudioFileReader", [&returnValue, filePath, mixToMono, sampleRate] {
         returnValue = AudioFileReader(filePath).createBus(sampleRate, mixToMono);
     });
-    waitForThreadCompletion(threadID);
+    thread->waitForCompletion();
     return returnValue;
 }
 
-PassRefPtr<AudioBus> createBusFromInMemoryAudioFile(const void* data, size_t dataSize, bool mixToMono, float sampleRate)
+RefPtr<AudioBus> createBusFromInMemoryAudioFile(const void* data, size_t dataSize, bool mixToMono, float sampleRate)
 {
     RefPtr<AudioBus> returnValue;
-    auto threadID = createThread("AudioFileReader", [&returnValue, data, dataSize, mixToMono, sampleRate] {
+    auto thread = Thread::create("AudioFileReader", [&returnValue, data, dataSize, mixToMono, sampleRate] {
         returnValue = AudioFileReader(data, dataSize).createBus(sampleRate, mixToMono);
     });
-    waitForThreadCompletion(threadID);
+    thread->waitForCompletion();
     return returnValue;
 }
 

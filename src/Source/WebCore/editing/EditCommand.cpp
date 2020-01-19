@@ -29,13 +29,13 @@
 #include "AXObjectCache.h"
 #include "CompositeEditCommand.h"
 #include "Document.h"
+#include "Editing.h"
 #include "Editor.h"
 #include "Element.h"
 #include "Frame.h"
 #include "HTMLInputElement.h"
 #include "HTMLTextAreaElement.h"
 #include "NodeTraversal.h"
-#include "htmlediting.h"
 
 namespace WebCore {
 
@@ -43,6 +43,7 @@ String inputTypeNameForEditingAction(EditAction action)
 {
     switch (action) {
     case EditActionJustify:
+        return ASCIILiteral("formatJustifyFull");
     case EditActionAlignLeft:
         return ASCIILiteral("formatJustifyLeft");
     case EditActionAlignRight:
@@ -56,7 +57,7 @@ String inputTypeNameForEditingAction(EditAction action)
     case EditActionUnderline:
         return ASCIILiteral("formatUnderline");
     case EditActionSetColor:
-        return ASCIILiteral("formatForeColor");
+        return ASCIILiteral("formatFontColor");
     case EditActionDeleteByDrag:
         return ASCIILiteral("deleteByDrag");
     case EditActionCut:
@@ -133,9 +134,7 @@ EditCommand::EditCommand(Document& document, const VisibleSelection& startingSel
     setEndingSelection(endingSelection);
 }
 
-EditCommand::~EditCommand()
-{
-}
+EditCommand::~EditCommand() = default;
 
 Frame& EditCommand::frame()
 {

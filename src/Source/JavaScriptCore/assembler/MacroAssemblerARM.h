@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2013-2016 Apple Inc.
+ * Copyright (C) 2008-2018 Apple Inc.
  * Copyright (C) 2009, 2010 University of Szeged
  * All rights reserved.
  *
@@ -34,7 +34,9 @@
 
 namespace JSC {
 
-class MacroAssemblerARM : public AbstractMacroAssembler<ARMAssembler, MacroAssemblerARM> {
+using Assembler = TARGET_ASSEMBLER;
+
+class MacroAssemblerARM : public AbstractMacroAssembler<Assembler> {
     static const int DoubleConditionMask = 0x0f;
     static const int DoubleConditionBitSpecial = 0x10;
     COMPILE_ASSERT(!(DoubleConditionBitSpecial & DoubleConditionMask), DoubleConditionBitSpecial_should_not_interfere_with_ARMAssembler_Condition_codes);
@@ -128,6 +130,13 @@ public:
         m_assembler.adds(dest, src, m_assembler.getImm(imm.m_value, ARMRegisters::S0));
     }
 
+    void getEffectiveAddress(BaseIndex address, RegisterID dest)
+    {
+        m_assembler.add(dest, address.base, m_assembler.lsl(address.index, static_cast<int>(address.scale)));
+        if (address.offset)
+            add32(TrustedImm32(address.offset), dest);
+    }
+
     void and32(RegisterID src, RegisterID dest)
     {
         m_assembler.bitAnds(dest, dest, src);
@@ -215,6 +224,11 @@ public:
     void neg32(RegisterID srcDest)
     {
         m_assembler.rsbs(srcDest, srcDest, ARMAssembler::getOp2Byte(0));
+    }
+
+    void neg32(RegisterID src, RegisterID dest)
+    {
+        m_assembler.rsbs(dest, src, ARMAssembler::getOp2Byte(0));
     }
 
     void or32(RegisterID src, RegisterID dest)
@@ -356,6 +370,12 @@ public:
     void xor32(RegisterID op1, RegisterID op2, RegisterID dest)
     {
         m_assembler.eors(dest, op1, op2);
+    }
+
+    void xor32(Address src, RegisterID dest)
+    {
+        load32(src, ARMRegisters::S1);
+        xor32(ARMRegisters::S1, dest);
     }
 
     void xor32(TrustedImm32 imm, RegisterID dest)
@@ -955,6 +975,8 @@ public:
         m_assembler.bkpt(0);
     }
 
+    static bool isBreakpoint(void* address) { return ARMAssembler::isBkpt(address); }
+
     Call nearCall()
     {
         m_assembler.loadBranchTarget(ARMRegisters::S1, ARMAssembler::AL, true);
@@ -1127,7 +1149,7 @@ public:
         return dataLabel;
     }
 
-    Jump branchPtrWithPatch(RelationalCondition cond, RegisterID left, DataLabelPtr& dataLabel, TrustedImmPtr initialRightValue = TrustedImmPtr(0))
+    Jump branchPtrWithPatch(RelationalCondition cond, RegisterID left, DataLabelPtr& dataLabel, TrustedImmPtr initialRightValue = TrustedImmPtr(nullptr))
     {
         ensureSpace(3 * sizeof(ARMWord), 2 * sizeof(ARMWord));
         dataLabel = moveWithPatch(initialRightValue, ARMRegisters::S1);
@@ -1135,7 +1157,7 @@ public:
         return jump;
     }
 
-    Jump branchPtrWithPatch(RelationalCondition cond, Address left, DataLabelPtr& dataLabel, TrustedImmPtr initialRightValue = TrustedImmPtr(0))
+    Jump branchPtrWithPatch(RelationalCondition cond, Address left, DataLabelPtr& dataLabel, TrustedImmPtr initialRightValue = TrustedImmPtr(nullptr))
     {
         load32(left, ARMRegisters::S1);
         ensureSpace(3 * sizeof(ARMWord), 2 * sizeof(ARMWord));
@@ -1162,7 +1184,7 @@ public:
 
     DataLabelPtr storePtrWithPatch(ImplicitAddress address)
     {
-        return storePtrWithPatch(TrustedImmPtr(0), address);
+        return storePtrWithPatch(TrustedImmPtr(nullptr), address);
     }
 
     // Floating point operators
@@ -1182,6 +1204,12 @@ public:
     }
     static bool supportsFloatingPointAbs() { return false; }
     static bool supportsFloatingPointRounding() { return false; }
+
+
+    void loadFloat(ImplicitAddress address, FPRegisterID dest)
+    {
+        m_assembler.dataTransferFloat(ARMAssembler::LoadFloat, dest, address.base, address.offset);
+    }
 
     void loadFloat(BaseIndex address, FPRegisterID dest)
     {
@@ -1220,6 +1248,11 @@ public:
     {
         ASSERT(!supportsFloatingPointRounding());
         CRASH();
+    }
+
+    void storeFloat(FPRegisterID src, ImplicitAddress address)
+    {
+        m_assembler.dataTransferFloat(ARMAssembler::StoreFloat, src, address.base, address.offset);
     }
 
     void storeFloat(FPRegisterID src, BaseIndex address)
@@ -1397,17 +1430,6 @@ public:
         return Jump(m_assembler.jmp(branchType == BranchIfTruncateFailed ? ARMAssembler::EQ : ARMAssembler::NE));
     }
 
-    Jump branchTruncateDoubleToUint32(FPRegisterID src, RegisterID dest, BranchTruncateType branchType = BranchIfTruncateFailed)
-    {
-        truncateDoubleToUint32(src, dest);
-
-        m_assembler.add(ARMRegisters::S0, dest, ARMAssembler::getOp2Byte(1));
-        m_assembler.bic(ARMRegisters::S0, ARMRegisters::S0, ARMAssembler::getOp2Byte(1));
-
-        m_assembler.cmp(ARMRegisters::S0, ARMAssembler::getOp2Byte(0));
-        return Jump(m_assembler.jmp(branchType == BranchIfTruncateFailed ? ARMAssembler::EQ : ARMAssembler::NE));
-    }
-
     // Result is undefined if the value is outside of the integer range.
     void truncateDoubleToInt32(FPRegisterID src, RegisterID dest)
     {
@@ -1540,10 +1562,6 @@ public:
         ARMAssembler::relinkCall(call.dataLocation(), destination.executableAddress());
     }
 
-#if ENABLE(MASM_PROBE)
-    void probe(ProbeFunction, void* arg1, void* arg2);
-#endif // ENABLE(MASM_PROBE)
-
 protected:
     ARMAssembler::Condition ARMCondition(RelationalCondition cond)
     {
@@ -1576,7 +1594,7 @@ private:
 
     void internalCompare32(RegisterID left, TrustedImm32 right)
     {
-        ARMWord tmp = (static_cast<unsigned>(right.m_value) == 0x80000000) ? ARMAssembler::InvalidImmediate : m_assembler.getOp2(-right.m_value);
+        ARMWord tmp = (!right.m_value || static_cast<unsigned>(right.m_value) == 0x80000000) ? ARMAssembler::InvalidImmediate : m_assembler.getOp2(-right.m_value);
         if (tmp != ARMAssembler::InvalidImmediate)
             m_assembler.cmn(left, tmp);
         else
@@ -1585,7 +1603,7 @@ private:
 
     void internalCompare32(Address left, TrustedImm32 right)
     {
-        ARMWord tmp = (static_cast<unsigned>(right.m_value) == 0x80000000) ? ARMAssembler::InvalidImmediate : m_assembler.getOp2(-right.m_value);
+        ARMWord tmp = (!right.m_value || static_cast<unsigned>(right.m_value) == 0x80000000) ? ARMAssembler::InvalidImmediate : m_assembler.getOp2(-right.m_value);
         load32(left, ARMRegisters::S1);
         if (tmp != ARMAssembler::InvalidImmediate)
             m_assembler.cmn(ARMRegisters::S1, tmp);
@@ -1600,24 +1618,6 @@ private:
         else
             ARMAssembler::linkCall(code, call.m_label, function.value());
     }
-
-
-#if ENABLE(MASM_PROBE)
-    inline TrustedImm32 trustedImm32FromPtr(void* ptr)
-    {
-        return TrustedImm32(TrustedImmPtr(ptr));
-    }
-
-    inline TrustedImm32 trustedImm32FromPtr(ProbeFunction function)
-    {
-        return TrustedImm32(TrustedImmPtr(reinterpret_cast<void*>(function)));
-    }
-
-    inline TrustedImm32 trustedImm32FromPtr(void (*function)())
-    {
-        return TrustedImm32(TrustedImmPtr(reinterpret_cast<void*>(function)));
-    }
-#endif
 
     static const bool s_isVFPPresent;
 };

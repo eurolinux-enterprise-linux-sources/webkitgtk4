@@ -253,6 +253,12 @@ ALWAYS_INLINE MacroAssembler::Call JIT::callOperation(C_JITOperation_ESt operati
     return appendCallWithExceptionCheck(operation);
 }
 
+ALWAYS_INLINE MacroAssembler::Call JIT::callOperation(C_JITOperation_EC operation, JSCell* cell)
+{
+    setupArgumentsWithExecState(TrustedImmPtr(cell));
+    return appendCallWithExceptionCheck(operation);
+}
+
 ALWAYS_INLINE MacroAssembler::Call JIT::callOperation(C_JITOperation_EZ operation, int32_t arg)
 {
     setupArgumentsWithExecState(TrustedImm32(arg));
@@ -463,6 +469,13 @@ ALWAYS_INLINE MacroAssembler::Call JIT::callOperation(J_JITOperation_EJJMic oper
     return call;
 }
 
+ALWAYS_INLINE MacroAssembler::Call JIT::callOperation(P_JITOperation_EUi operation, uint32_t arg1)
+{
+    setupArgumentsWithExecState(TrustedImm32(arg1));
+    updateTopCallFrame();
+    return appendCall(operation);
+}
+
 #if USE(JSVALUE64)
 ALWAYS_INLINE MacroAssembler::Call JIT::callOperation(Z_JITOperation_EJZZ operation, GPRReg arg1, int32_t arg2, int32_t arg3)
 {
@@ -515,6 +528,12 @@ ALWAYS_INLINE MacroAssembler::Call JIT::callOperation(J_JITOperation_ESsiJI oper
 ALWAYS_INLINE MacroAssembler::Call JIT::callOperation(JIT::WithProfileTag, J_JITOperation_ESsiJI operation, int dst, StructureStubInfo* stubInfo, GPRReg arg1, UniquedStringImpl* uid)
 {
     setupArgumentsWithExecState(TrustedImmPtr(stubInfo), arg1, TrustedImmPtr(uid));
+    return appendCallWithExceptionCheckSetJSValueResultWithProfile(operation, dst);
+}
+
+ALWAYS_INLINE MacroAssembler::Call JIT::callOperation(JIT::WithProfileTag, J_JITOperation_ESsiJJI operation, int dst, StructureStubInfo* stubInfo, GPRReg arg1, GPRReg arg2, UniquedStringImpl* uid)
+{
+    setupArgumentsWithExecState(TrustedImmPtr(stubInfo), arg1, arg2, TrustedImmPtr(uid));
     return appendCallWithExceptionCheckSetJSValueResultWithProfile(operation, dst);
 }
 
@@ -704,6 +723,12 @@ ALWAYS_INLINE MacroAssembler::Call JIT::callOperation(J_JITOperation_EJI operati
     return appendCallWithExceptionCheckSetJSValueResult(operation, dst);
 }
 
+ALWAYS_INLINE MacroAssembler::Call JIT::callOperation(JIT::WithProfileTag, J_JITOperation_ESsiJJI operation, int dst, StructureStubInfo* stubInfo, GPRReg arg1Tag, GPRReg arg1Payload, GPRReg arg2Tag, GPRReg arg2Payload, UniquedStringImpl* uid)
+{
+    setupArgumentsWithExecState(TrustedImmPtr(stubInfo), arg1Payload, arg1Tag, arg2Payload, arg2Tag, TrustedImmPtr(uid));
+    return appendCallWithExceptionCheckSetJSValueResultWithProfile(operation, dst);
+}
+
 ALWAYS_INLINE MacroAssembler::Call JIT::callOperation(J_JITOperation_EJJ operation, int dst, GPRReg arg1Tag, GPRReg arg1Payload, GPRReg arg2Tag, GPRReg arg2Payload)
 {
     setupArgumentsWithExecState(EABI_32BIT_DUMMY_ARG arg1Payload, arg1Tag, arg2Payload, arg2Tag);
@@ -845,10 +870,8 @@ ALWAYS_INLINE void JIT::linkSlowCaseIfNotJSCell(Vector<SlowCaseEntry>::iterator&
 
 ALWAYS_INLINE void JIT::linkAllSlowCasesForBytecodeOffset(Vector<SlowCaseEntry>& slowCases, Vector<SlowCaseEntry>::iterator& iter, unsigned bytecodeOffset)
 {
-    while (iter != slowCases.end() && iter->to == bytecodeOffset) {
-        iter->from.link(this);
-        ++iter;
-    }
+    while (iter != slowCases.end() && iter->to == bytecodeOffset)
+        linkSlowCase(iter);
 }
 
 ALWAYS_INLINE void JIT::addSlowCase(Jump jump)
@@ -956,10 +979,9 @@ ALWAYS_INLINE bool JIT::isOperandConstantChar(int src)
     return m_codeBlock->isConstantRegisterIndex(src) && getConstantOperand(src).isString() && asString(getConstantOperand(src).asCell())->length() == 1;
 }
 
-inline void JIT::emitValueProfilingSite(ValueProfile* valueProfile)
+inline void JIT::emitValueProfilingSite(ValueProfile& valueProfile)
 {
     ASSERT(shouldEmitProfiling());
-    ASSERT(valueProfile);
 
     const RegisterID value = regT0;
 #if USE(JSVALUE32_64)
@@ -969,9 +991,9 @@ inline void JIT::emitValueProfilingSite(ValueProfile* valueProfile)
     // We're in a simple configuration: only one bucket, so we can just do a direct
     // store.
 #if USE(JSVALUE64)
-    store64(value, valueProfile->m_buckets);
+    store64(value, valueProfile.m_buckets);
 #else
-    EncodedValueDescriptor* descriptor = bitwise_cast<EncodedValueDescriptor*>(valueProfile->m_buckets);
+    EncodedValueDescriptor* descriptor = bitwise_cast<EncodedValueDescriptor*>(valueProfile.m_buckets);
     store32(value, &descriptor->asBits.payload);
     store32(valueTag, &descriptor->asBits.tag);
 #endif

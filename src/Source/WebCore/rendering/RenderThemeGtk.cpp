@@ -61,15 +61,10 @@
 
 namespace WebCore {
 
-Ref<RenderTheme> RenderThemeGtk::create()
+RenderTheme& RenderTheme::singleton()
 {
-    return adoptRef(*new RenderThemeGtk());
-}
-
-Ref<RenderTheme> RenderTheme::themeForPage(Page*)
-{
-    static RenderTheme& rt = RenderThemeGtk::create().leakRef();
-    return rt;
+    static NeverDestroyed<RenderThemeGtk> theme;
+    return theme;
 }
 
 static double getScreenDPI()
@@ -110,8 +105,8 @@ void RenderThemeGtk::updateCachedSystemFontDescription(CSSValueID, FontCascadeDe
 
     fontDescription.setSpecifiedSize(size);
     fontDescription.setIsAbsoluteSize(true);
-    fontDescription.setWeight(FontWeightNormal);
-    fontDescription.setItalic(FontItalicOff);
+    fontDescription.setWeight(normalWeightValue());
+    fontDescription.setItalic(FontSelectionValue());
     pango_font_description_free(pangoDescription);
 }
 
@@ -317,9 +312,7 @@ static bool nodeHasClass(Node* node, const char* className)
     return element.classNames().contains(className);
 }
 
-RenderThemeGtk::~RenderThemeGtk()
-{
-}
+RenderThemeGtk::~RenderThemeGtk() = default;
 
 static bool supportsFocus(ControlPart appearance)
 {
@@ -1027,7 +1020,7 @@ static void adjustSearchFieldIconStyle(RenderThemePart themePart, RenderStyle& s
 
     // Get the icon size based on the font size.
     auto& icon = static_cast<RenderThemeIconGadget&>(themePart == EntryIconLeft ? searchEntryWidget.leftIcon() : searchEntryWidget.rightIcon());
-    icon.setIconSize(style.fontSize());
+    icon.setIconSize(style.computedFontPixelSize());
     IntSize preferredSize = icon.preferredSize();
     GtkBorder contentsBox = searchEntryWidget.entry().contentsBox();
     if (themePart == EntryIconLeft)
@@ -1074,7 +1067,7 @@ static void adjustSearchFieldIconStyle(RenderThemePart themePart, RenderStyle& s
     gtk_style_context_get_padding(context.get(), gtk_style_context_get_state(context.get()), &padding);
 
     // Get the icon size based on the font size.
-    int fontSize = style.fontSize();
+    int fontSize = style.computedFontPixelSize();
     if (fontSize < gtkIconSizeMenu) {
         style.setWidth(Length(fontSize + (padding.left + padding.right), Fixed));
         style.setHeight(Length(fontSize + (padding.top + padding.bottom), Fixed));
@@ -1120,7 +1113,7 @@ static bool paintSearchFieldIcon(RenderThemeGtk* theme, RenderThemePart themePar
     searchEntryWidget.entry().setState(themePartStateFlags(*theme, Entry, renderObject));
     auto& icon = static_cast<RenderThemeIconGadget&>(themePart == EntryIconLeft ? searchEntryWidget.leftIcon() : searchEntryWidget.rightIcon());
     icon.setState(themePartStateFlags(*theme, themePart, renderObject));
-    icon.setIconSize(renderObject.style().fontSize());
+    icon.setIconSize(renderObject.style().computedFontPixelSize());
     GtkBorder contentsBox = searchEntryWidget.entry().contentsBox();
     IntRect iconRect = rect;
     if (themePart == EntryIconLeft) {
@@ -1664,7 +1657,7 @@ bool RenderThemeGtk::paintInnerSpinButton(const RenderObject& renderObject, cons
 }
 #endif // GTK_CHECK_VERSION(3, 20, 0)
 
-double RenderThemeGtk::caretBlinkInterval() const
+Seconds RenderThemeGtk::caretBlinkInterval() const
 {
     GtkSettings* settings = gtk_settings_get_default();
 
@@ -1674,9 +1667,9 @@ double RenderThemeGtk::caretBlinkInterval() const
     g_object_get(settings, "gtk-cursor-blink", &shouldBlink, "gtk-cursor-blink-time", &time, nullptr);
 
     if (!shouldBlink)
-        return 0;
+        return 0_s;
 
-    return time / 2000.;
+    return 500_us * time;
 }
 
 enum StyleColorType { StyleColorBackground, StyleColorForeground };
@@ -1876,7 +1869,7 @@ static FloatRoundedRect::Radii borderRadiiFromStyle(const RenderStyle& style)
 
 bool RenderThemeGtk::paintMediaSliderTrack(const RenderObject& o, const PaintInfo& paintInfo, const IntRect& r)
 {
-    HTMLMediaElement* mediaElement = parentMediaElement(o);
+    auto mediaElement = parentMediaElement(o);
     if (!mediaElement)
         return true;
 
@@ -1916,7 +1909,7 @@ bool RenderThemeGtk::paintMediaSliderThumb(const RenderObject& o, const PaintInf
 
 bool RenderThemeGtk::paintMediaVolumeSliderTrack(const RenderObject& renderObject, const PaintInfo& paintInfo, const IntRect& rect)
 {
-    HTMLMediaElement* mediaElement = parentMediaElement(renderObject);
+    auto mediaElement = parentMediaElement(renderObject);
     if (!mediaElement)
         return true;
 
@@ -1965,15 +1958,15 @@ void RenderThemeGtk::adjustProgressBarStyle(StyleResolver&, RenderStyle& style, 
 // These values have been copied from RenderThemeChromiumSkia.cpp
 static const int progressActivityBlocks = 5;
 static const int progressAnimationFrames = 10;
-static const double progressAnimationInterval = 0.125;
-double RenderThemeGtk::animationRepeatIntervalForProgressBar(RenderProgress&) const
+static const Seconds progressAnimationInterval { 125_ms };
+Seconds RenderThemeGtk::animationRepeatIntervalForProgressBar(RenderProgress&) const
 {
     return progressAnimationInterval;
 }
 
 double RenderThemeGtk::animationDurationForProgressBar(RenderProgress&) const
 {
-    return progressAnimationInterval * progressAnimationFrames * 2; // "2" for back and forth;
+    return progressAnimationInterval.value() * progressAnimationFrames * 2; // "2" for back and forth;
 }
 
 IntRect RenderThemeGtk::calculateProgressRect(const RenderObject& renderObject, const IntRect& fullBarRect)
@@ -2016,7 +2009,7 @@ String RenderThemeGtk::fileListNameForWidth(const FileList* fileList, const Font
 
     String string;
     if (fileList->length())
-        string = pathGetFileName(fileList->item(0)->path());
+        string = FileSystem::pathGetFileName(fileList->item(0)->path());
     else if (multipleFilesAllowed)
         string = fileButtonNoFilesSelectedLabel();
     else

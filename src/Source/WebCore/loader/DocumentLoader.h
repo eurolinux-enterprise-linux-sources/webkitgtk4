@@ -32,7 +32,7 @@
 #include "CachedRawResourceClient.h"
 #include "CachedResourceHandle.h"
 #include "DocumentWriter.h"
-#include "IconDatabaseBase.h"
+#include "FrameDestructionObserver.h"
 #include "LinkIcon.h"
 #include "LoadTiming.h"
 #include "NavigationAction.h"
@@ -40,25 +40,32 @@
 #include "ResourceLoaderOptions.h"
 #include "ResourceRequest.h"
 #include "ResourceResponse.h"
+#include "ServiceWorkerRegistrationData.h"
 #include "StringWithDirection.h"
 #include "StyleSheetContents.h"
 #include "SubstituteData.h"
 #include "Timer.h"
 #include <wtf/HashSet.h>
+#include <wtf/OptionSet.h>
 #include <wtf/RefPtr.h>
 #include <wtf/Vector.h>
+
+#if ENABLE(APPLICATION_MANIFEST)
+#include "ApplicationManifest.h"
+#endif
 
 #if HAVE(RUNLOOP_TIMER)
 #include <wtf/RunLoopTimer.h>
 #endif
 
-#if PLATFORM(COCOA) && !USE(CFURLCONNECTION)
+#if PLATFORM(COCOA)
 #include <wtf/SchedulePair.h>
 #endif
 
 namespace WebCore {
 
 class ApplicationCacheHost;
+class ApplicationManifestLoader;
 class Archive;
 class ArchiveResource;
 class ArchiveResourceCollection;
@@ -68,6 +75,7 @@ class ContentFilter;
 class FormState;
 class Frame;
 class FrameLoader;
+class HTTPHeaderField;
 class IconLoader;
 class Page;
 class PreviewConverter;
@@ -85,7 +93,19 @@ enum class AutoplayPolicy {
     Deny,
 };
 
-class DocumentLoader : public RefCounted<DocumentLoader>, private CachedRawResourceClient {
+enum class AutoplayQuirk {
+    SynthesizedPauseEvents = 1 << 0,
+    InheritedUserGestures = 1 << 1,
+    ArbitraryUserGestures = 1 << 2,
+};
+
+enum class PopUpPolicy {
+    Default, // Uses policies specified in frame settings.
+    Allow,
+    Block,
+};
+
+class DocumentLoader : public RefCounted<DocumentLoader>, public FrameDestructionObserver, private CachedRawResourceClient {
     WTF_MAKE_FAST_ALLOCATED;
     friend class ContentFilter;
 public:
@@ -96,7 +116,6 @@ public:
     WEBCORE_EXPORT virtual ~DocumentLoader();
 
     void attachToFrame(Frame&);
-    Frame* frame() const { return m_frame; }
 
     WEBCORE_EXPORT virtual void detachFromFrame();
 
@@ -137,10 +156,9 @@ public:
     const ResourceError& mainDocumentError() const { return m_mainDocumentError; }
 
     const ResourceResponse& response() const { return m_response; }
-#if PLATFORM(IOS)
+
     // FIXME: This method seems to violate the encapsulation of this class.
     void setResponse(const ResourceResponse& response) { m_response = response; }
-#endif
 
     bool isClientRedirect() const { return m_isClientRedirect; }
     void setIsClientRedirect(bool isClientRedirect) { m_isClientRedirect = isClientRedirect; }
@@ -150,7 +168,7 @@ public:
     WEBCORE_EXPORT void setTitle(const StringWithDirection&);
     const String& overrideEncoding() const { return m_overrideEncoding; }
 
-#if PLATFORM(COCOA) && !USE(CFURLCONNECTION)
+#if PLATFORM(COCOA)
     void schedule(SchedulePair&);
     void unschedule(SchedulePair&);
 #endif
@@ -166,6 +184,7 @@ public:
 #endif
 
     void scheduleSubstituteResourceLoad(ResourceLoader&, SubstituteResource&);
+    void scheduleCannotShowURLError(ResourceLoader&);
 
     // Return the ArchiveResource for the URL only when loading an Archive
     WEBCORE_EXPORT ArchiveResource* archiveResourceForURL(const URL&) const;
@@ -189,7 +208,7 @@ public:
     const NavigationAction& triggeringAction() const { return m_triggeringAction; }
     void setTriggeringAction(const NavigationAction&);
     void setOverrideEncoding(const String& encoding) { m_overrideEncoding = encoding; }
-    void setLastCheckedRequest(const ResourceRequest& request) { m_lastCheckedRequest = request; }
+    void setLastCheckedRequest(ResourceRequest&& request) { m_lastCheckedRequest = WTFMove(request); }
     const ResourceRequest& lastCheckedRequest()  { return m_lastCheckedRequest; }
 
     void stopRecordingResponses();
@@ -222,14 +241,6 @@ public:
     WEBCORE_EXPORT void cancelMainResourceLoad(const ResourceError&);
     void willContinueMainResourceLoadAfterRedirect(const ResourceRequest&);
 
-    // Support iconDatabase in synchronous mode.
-    void iconLoadDecisionAvailable();
-    
-    // Support iconDatabase in asynchronous mode.
-    void continueIconLoadWithDecision(IconLoadDecision);
-    void getIconLoadDecisionForIconURL(const String&);
-    void getIconDataForIconURL(const String&);
-
     bool isLoadingMainResource() const { return m_loadingMainResource; }
     bool isLoadingMultipartContent() const { return m_isLoadingMultipartContent; }
 
@@ -241,6 +252,12 @@ public:
 
     AutoplayPolicy autoplayPolicy() const { return m_autoplayPolicy; }
     void setAutoplayPolicy(AutoplayPolicy policy) { m_autoplayPolicy = policy; }
+
+    OptionSet<AutoplayQuirk> allowedAutoplayQuirks() const { return m_allowedAutoplayQuirks; }
+    void setAllowedAutoplayQuirks(OptionSet<AutoplayQuirk> allowedQuirks) { m_allowedAutoplayQuirks = allowedQuirks; }
+
+    PopUpPolicy popUpPolicy() const { return m_popUpPolicy; }
+    void setPopUpPolicy(PopUpPolicy popUpPolicy) { m_popUpPolicy = popUpPolicy; }
 
     void addSubresourceLoader(ResourceLoader*);
     void removeSubresourceLoader(ResourceLoader*);
@@ -293,6 +310,16 @@ public:
     WEBCORE_EXPORT void didGetLoadDecisionForIcon(bool decision, uint64_t loadIdentifier, uint64_t newCallbackID);
     void finishedLoadingIcon(IconLoader&, SharedBuffer*);
 
+    const Vector<LinkIcon>& linkIcons() const { return m_linkIcons; }
+
+#if ENABLE(APPLICATION_MANIFEST)
+    WEBCORE_EXPORT uint64_t loadApplicationManifest();
+    void finishedLoadingApplicationManifest(ApplicationManifestLoader&);
+#endif
+
+    WEBCORE_EXPORT void setCustomHeaderFields(Vector<HTTPHeaderField>&& fields);
+    const Vector<HTTPHeaderField>& customHeaderFields() { return m_customHeaderFields; }
+    
 protected:
     WEBCORE_EXPORT DocumentLoader(const ResourceRequest&, const SubstituteData&);
 
@@ -302,6 +329,12 @@ protected:
 
 private:
     Document* document() const;
+
+#if ENABLE(SERVICE_WORKER)
+    void matchRegistration(const URL&, CompletionHandler<void(std::optional<ServiceWorkerRegistrationData>&&)>&&);
+#endif
+
+    void loadMainResource(ResourceRequest&&);
 
     void setRequest(const ResourceRequest&);
 
@@ -318,10 +351,10 @@ private:
     void clearArchiveResources();
 #endif
 
-    void willSendRequest(ResourceRequest&, const ResourceResponse&);
-    void finishedLoading(double finishTime);
+    void willSendRequest(ResourceRequest&&, const ResourceResponse&, CompletionHandler<void(ResourceRequest&&)>&&);
+    void finishedLoading();
     void mainReceivedError(const ResourceError&);
-    WEBCORE_EXPORT void redirectReceived(CachedResource&, ResourceRequest&, const ResourceResponse&) override;
+    WEBCORE_EXPORT void redirectReceived(CachedResource&, ResourceRequest&&, const ResourceResponse&, CompletionHandler<void(ResourceRequest&&)>&&) override;
     WEBCORE_EXPORT void responseReceived(CachedResource&, const ResourceResponse&) override;
     WEBCORE_EXPORT void dataReceived(CachedResource&, const char* data, int length) override;
     WEBCORE_EXPORT void notifyFinished(CachedResource&) override;
@@ -359,7 +392,12 @@ private:
     void cancelPolicyCheckIfNeeded();
     void becomeMainResourceClient();
 
-    Frame* m_frame { nullptr };
+    void notifyFinishedLoadingIcon(uint64_t callbackIdentifier, SharedBuffer*);
+
+#if ENABLE(APPLICATION_MANIFEST)
+    void notifyFinishedLoadingApplicationManifest(uint64_t callbackIdentifier, std::optional<ApplicationManifest>);
+#endif
+
     Ref<CachedResourceLoader> m_cachedResourceLoader;
 
     CachedResourceHandle<CachedRawResource> m_mainResource;
@@ -445,14 +483,16 @@ private:
     bool m_waitingForContentPolicy { false };
     bool m_waitingForNavigationPolicy { false };
 
-    // For IconDatabase-style loads
-    RefPtr<IconLoadDecisionCallback> m_iconLoadDecisionCallback;
-    RefPtr<IconDataCallback> m_iconDataCallback;
-
-    // For IconLoadingClient-style loads
     HashMap<uint64_t, LinkIcon> m_iconsPendingLoadDecision;
     HashMap<std::unique_ptr<IconLoader>, uint64_t> m_iconLoaders;
+    Vector<LinkIcon> m_linkIcons;
 
+#if ENABLE(APPLICATION_MANIFEST)
+    HashMap<std::unique_ptr<ApplicationManifestLoader>, uint64_t> m_applicationManifestLoaders;
+#endif
+
+    Vector<HTTPHeaderField> m_customHeaderFields;
+    
     bool m_subresourceLoadersArePageCacheAcceptable { false };
     ShouldOpenExternalURLsPolicy m_shouldOpenExternalURLsPolicy { ShouldOpenExternalURLsPolicy::ShouldNotAllow };
 
@@ -472,6 +512,12 @@ private:
 #endif
     bool m_userContentExtensionsEnabled { true };
     AutoplayPolicy m_autoplayPolicy { AutoplayPolicy::Default };
+    OptionSet<AutoplayQuirk> m_allowedAutoplayQuirks;
+    PopUpPolicy m_popUpPolicy { PopUpPolicy::Default };
+
+#if ENABLE(SERVICE_WORKER)
+    std::optional<ServiceWorkerRegistrationData> m_serviceWorkerRegistrationData;
+#endif
 
 #ifndef NDEBUG
     bool m_hasEverBeenAttached { false };

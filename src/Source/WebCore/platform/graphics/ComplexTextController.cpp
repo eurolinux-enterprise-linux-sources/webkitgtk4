@@ -78,8 +78,6 @@ private:
     static TextRun constructTextRun(RenderText& text, float xPos)
     {
         TextRun run = RenderBlock::constructTextRun(text, text.style());
-        run.setCharactersLength(text.textLength());
-        ASSERT(run.charactersLength() >= run.length());
         run.setXPos(xPos);
         return run;
     }
@@ -92,7 +90,7 @@ private:
 
 void TextLayoutDeleter::operator()(TextLayout* layout) const
 {
-#if PLATFORM(COCOA)
+#if !PLATFORM(WIN)
     delete layout;
 #else
     ASSERT_UNUSED(layout, !layout);
@@ -101,7 +99,7 @@ void TextLayoutDeleter::operator()(TextLayout* layout) const
 
 std::unique_ptr<TextLayout, TextLayoutDeleter> FontCascade::createLayout(RenderText& text, float xPos, bool collapseWhiteSpace) const
 {
-#if PLATFORM(COCOA)
+#if !PLATFORM(WIN)
     if (!collapseWhiteSpace || !TextLayout::isNeeded(text, *this))
         return nullptr;
     return std::unique_ptr<TextLayout, TextLayoutDeleter>(new TextLayout(text, *this, xPos));
@@ -115,7 +113,7 @@ std::unique_ptr<TextLayout, TextLayoutDeleter> FontCascade::createLayout(RenderT
 
 float FontCascade::width(TextLayout& layout, unsigned from, unsigned len, HashSet<const Font*>* fallbackFonts)
 {
-#if PLATFORM(COCOA)
+#if !PLATFORM(WIN)
     return layout.width(from, len, fallbackFonts);
 #else
     UNUSED_PARAM(layout);
@@ -217,20 +215,17 @@ unsigned ComplexTextController::offsetForPosition(float h, bool includePartialGl
                 // could use the glyph's "ligature carets". This is available in CoreText via CTFontGetLigatureCaretPositions().
                 unsigned hitIndex = hitGlyphStart + (hitGlyphEnd - hitGlyphStart) * (m_run.ltr() ? x / adjustedAdvance : 1 - x / adjustedAdvance);
                 unsigned stringLength = complexTextRun.stringLength();
-                UBreakIterator* cursorPositionIterator = cursorMovementIterator(StringView(complexTextRun.characters(), stringLength));
+                CachedTextBreakIterator cursorPositionIterator(StringView(complexTextRun.characters(), stringLength), TextBreakIterator::Mode::Caret, nullAtom());
                 unsigned clusterStart;
-                if (ubrk_isBoundary(cursorPositionIterator, hitIndex))
+                if (cursorPositionIterator.isBoundary(hitIndex))
                     clusterStart = hitIndex;
-                else {
-                    int preceeding = ubrk_preceding(cursorPositionIterator, hitIndex);
-                    clusterStart = preceeding == UBRK_DONE ? 0 : preceeding;
-                }
+                else
+                    clusterStart = cursorPositionIterator.preceding(hitIndex).value_or(0);
 
                 if (!includePartialGlyphs)
                     return complexTextRun.stringLocation() + clusterStart;
 
-                int following = ubrk_following(cursorPositionIterator, hitIndex);
-                unsigned clusterEnd = following == UBRK_DONE ? stringLength : following;
+                unsigned clusterEnd = cursorPositionIterator.following(hitIndex).value_or(stringLength);
 
                 float clusterWidth;
                 // FIXME: The search stops at the boundaries of complexTextRun. In theory, it should go on into neighboring ComplexTextRuns

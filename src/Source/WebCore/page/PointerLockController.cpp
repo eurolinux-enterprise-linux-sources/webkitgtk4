@@ -35,9 +35,8 @@
 #include "Page.h"
 #include "PlatformMouseEvent.h"
 #include "RuntimeEnabledFeatures.h"
-#include "ScriptController.h"
+#include "UserGestureIndicator.h"
 #include "VoidCallback.h"
-
 
 namespace WebCore {
 
@@ -53,7 +52,7 @@ void PointerLockController::requestPointerLock(Element* target)
         return;
     }
 
-    if (m_documentAllowedToRelockWithoutUserGesture != &target->document() && !ScriptController::processingUserGesture()) {
+    if (m_documentAllowedToRelockWithoutUserGesture != &target->document() && !UserGestureIndicator::processingUserGesture()) {
         enqueueEvent(eventNames().pointerlockerrorEvent, target);
         return;
     }
@@ -140,6 +139,11 @@ Element* PointerLockController::element() const
 
 void PointerLockController::didAcquirePointerLock()
 {
+    if (!m_lockPending)
+        return;
+    
+    ASSERT(m_element);
+    
     enqueueEvent(eventNames().pointerlockchangeEvent, m_element.get());
     m_lockPending = false;
     m_forceCursorVisibleUponUnlock = false;

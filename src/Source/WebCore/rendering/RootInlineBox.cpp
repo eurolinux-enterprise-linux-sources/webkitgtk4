@@ -29,21 +29,25 @@
 #include "GraphicsContext.h"
 #include "HitTestResult.h"
 #include "InlineTextBox.h"
+#include "LayoutState.h"
 #include "LogicalSelectionOffsetCaches.h"
 #include "PaintInfo.h"
-#include "RenderFlowThread.h"
+#include "RenderFragmentedFlow.h"
 #include "RenderInline.h"
 #include "RenderRubyBase.h"
 #include "RenderRubyRun.h"
 #include "RenderRubyText.h"
 #include "RenderView.h"
 #include "VerticalPositionCache.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
+WTF_MAKE_ISO_ALLOCATED_IMPL(RootInlineBox);
+
 struct SameSizeAsRootInlineBox : public InlineFlowBox {
     unsigned variables[7];
-    void* pointers[3];
+    void* pointers[4];
 };
 
 COMPILE_ASSERT(sizeof(RootInlineBox) == sizeof(SameSizeAsRootInlineBox), RootInlineBox_should_stay_small);
@@ -51,16 +55,15 @@ COMPILE_ASSERT(sizeof(RootInlineBox) == sizeof(SameSizeAsRootInlineBox), RootInl
 typedef WTF::HashMap<const RootInlineBox*, std::unique_ptr<EllipsisBox>> EllipsisBoxMap;
 static EllipsisBoxMap* gEllipsisBoxMap;
 
-static ContainingRegionMap& containingRegionMap(RenderBlockFlow& block)
+static ContainingFragmentMap& containingFragmentMap(RenderBlockFlow& block)
 {
-    ASSERT(block.flowThreadContainingBlock());
-    return block.flowThreadContainingBlock()->containingRegionMap();
+    ASSERT(block.enclosingFragmentedFlow());
+    return block.enclosingFragmentedFlow()->containingFragmentMap();
 }
 
 RootInlineBox::RootInlineBox(RenderBlockFlow& block)
     : InlineFlowBox(block)
     , m_lineBreakPos(0)
-    , m_lineBreakObj(nullptr)
 {
     setIsHorizontal(block.isHorizontalWritingMode());
 }
@@ -69,8 +72,8 @@ RootInlineBox::~RootInlineBox()
 {
     detachEllipsisBox();
 
-    if (blockFlow().flowThreadContainingBlock())
-        containingRegionMap(blockFlow()).remove(this);
+    if (blockFlow().enclosingFragmentedFlow())
+        containingFragmentMap(blockFlow()).remove(this);
 }
 
 void RootInlineBox::detachEllipsisBox()
@@ -164,15 +167,6 @@ void RootInlineBox::paintEllipsisBox(PaintInfo& paintInfo, const LayoutPoint& pa
 
 void RootInlineBox::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset, LayoutUnit lineTop, LayoutUnit lineBottom)
 {
-    RenderNamedFlowFragment* namedFlowFragment = renderer().currentRenderNamedFlowFragment();
-
-    // Check if we are in the correct region.
-    if (namedFlowFragment) {
-        RenderRegion* region = containingRegion();
-        if (region && region != reinterpret_cast<RenderRegion*>(namedFlowFragment))
-            return;
-    }
-    
     InlineFlowBox::paint(paintInfo, paintOffset, lineTop, lineBottom);
     paintEllipsisBox(paintInfo, paintOffset, lineTop, lineBottom);
 }
@@ -211,38 +205,38 @@ void RootInlineBox::childRemoved(InlineBox* box)
     }
 }
 
-RenderRegion* RootInlineBox::containingRegion() const
+RenderFragmentContainer* RootInlineBox::containingFragment() const
 {
-    ContainingRegionMap& regionMap = containingRegionMap(blockFlow());
-    bool hasContainingRegion = regionMap.contains(this);
-    RenderRegion* region = hasContainingRegion ? regionMap.get(this) : nullptr;
+    ContainingFragmentMap& fragmentMap = containingFragmentMap(blockFlow());
+    bool hasContainingFragment = fragmentMap.contains(this);
+    RenderFragmentContainer* fragment = hasContainingFragment ? fragmentMap.get(this) : nullptr;
 
 #ifndef NDEBUG
-    if (hasContainingRegion) {
-        RenderFlowThread* flowThread = blockFlow().flowThreadContainingBlock();
-        const RenderRegionList& regionList = flowThread->renderRegionList();
-        ASSERT_WITH_SECURITY_IMPLICATION(regionList.contains(region));
+    if (hasContainingFragment) {
+        RenderFragmentedFlow* fragmentedFlow = blockFlow().enclosingFragmentedFlow();
+        const RenderFragmentContainerList& fragmentList = fragmentedFlow->renderFragmentContainerList();
+        ASSERT_WITH_SECURITY_IMPLICATION(fragmentList.contains(fragment));
     }
 #endif
 
-    return region;
+    return fragment;
 }
 
-void RootInlineBox::clearContainingRegion()
+void RootInlineBox::clearContainingFragment()
 {
     ASSERT(!isDirty());
 
-    if (!containingRegionMap(blockFlow()).contains(this))
+    if (!containingFragmentMap(blockFlow()).contains(this))
         return;
 
-    containingRegionMap(blockFlow()).remove(this);
+    containingFragmentMap(blockFlow()).remove(this);
 }
 
-void RootInlineBox::setContainingRegion(RenderRegion& region)
+void RootInlineBox::setContainingFragment(RenderFragmentContainer& fragment)
 {
     ASSERT(!isDirty());
 
-    containingRegionMap(blockFlow()).set(this, &region);
+    containingFragmentMap(blockFlow()).set(this, &fragment);
 }
 
 LayoutUnit RootInlineBox::alignBoxesInBlockDirection(LayoutUnit heightOfBlock, GlyphOverflowAndFallbackFontsMap& textBoxDataMap, VerticalPositionCache& verticalPositionCache)
@@ -284,8 +278,8 @@ LayoutUnit RootInlineBox::alignBoxesInBlockDirection(LayoutUnit heightOfBlock, G
     
     maxHeight = std::max<LayoutUnit>(0, maxHeight); // FIXME: Is this really necessary?
 
-    LayoutUnit lineTopWithLeading = !hasAnonymousInlineBlock() ? heightOfBlock : lineTop;
-    LayoutUnit lineBottomWithLeading = !hasAnonymousInlineBlock() ? heightOfBlock + maxHeight : lineBottom;
+    LayoutUnit lineTopWithLeading = heightOfBlock;
+    LayoutUnit lineBottomWithLeading = heightOfBlock + maxHeight;
     setLineTopBottomPositions(lineTop, lineBottom, lineTopWithLeading, lineBottomWithLeading);
     setPaginatedLineWidth(blockFlow().availableLogicalWidthForContent(heightOfBlock));
 
@@ -345,7 +339,7 @@ LayoutUnit RootInlineBox::lineSnapAdjustment(LayoutUnit delta) const
         return 0;
 
     // Get the current line grid and offset.
-    LayoutState* layoutState = blockFlow().view().layoutState();
+    auto* layoutState = blockFlow().view().frameView().layoutContext().layoutState();
     RenderBlockFlow* lineGrid = layoutState->lineGrid();
     LayoutSize lineGridOffset = layoutState->lineGridOffset();
     if (!lineGrid || lineGrid->style().writingMode() != blockFlow().style().writingMode())
@@ -819,7 +813,7 @@ BidiStatus RootInlineBox::lineBreakBidiStatus() const
 
 void RootInlineBox::setLineBreakInfo(RenderObject* object, unsigned breakPosition, const BidiStatus& status)
 {
-    m_lineBreakObj = object;
+    m_lineBreakObj = makeWeakPtr(object);
     m_lineBreakPos = breakPosition;
     m_lineBreakBidiStatusEor = status.eor;
     m_lineBreakBidiStatusLastStrong = status.lastStrong;
@@ -890,14 +884,6 @@ void RootInlineBox::ascentAndDescentForBox(InlineBox& box, GlyphOverflowAndFallb
     // Replaced boxes will return 0 for the line-height if line-box-contain says they are
     // not to be included.
     if (box.renderer().isReplaced()) {
-        if (hasAnonymousInlineBlock()) {
-            ascent = 0; // Margins exist "outside" the line, since they have to collapse.
-            descent = 0;
-            affectsAscent = true;
-            affectsDescent = true;
-            return;
-        }
-            
         if (lineStyle().lineBoxContain() & LineBoxContainReplaced) {
             ascent = box.baselinePosition(baselineType());
             descent = box.lineHeight() - ascent;
@@ -908,9 +894,6 @@ void RootInlineBox::ascentAndDescentForBox(InlineBox& box, GlyphOverflowAndFallb
         }
         return;
     }
-    
-    if (hasAnonymousInlineBlock())
-        return;
 
     Vector<const Font*>* usedFonts = nullptr;
     GlyphOverflow* glyphOverflow = nullptr;
@@ -982,8 +965,7 @@ void RootInlineBox::ascentAndDescentForBox(InlineBox& box, GlyphOverflowAndFallb
     }
     
     if (includeInitialLetterForBox(box)) {
-        // FIXME: Can't use glyph bounds in vertical writing mode because they are garbage.
-        bool canUseGlyphs = isHorizontal() && glyphOverflow && glyphOverflow->computeBounds;
+        bool canUseGlyphs = glyphOverflow && glyphOverflow->computeBounds;
         int letterAscent = baselineType() == AlphabeticBaseline ? boxLineStyle.fontMetrics().capHeight() : (canUseGlyphs ? glyphOverflow->top : boxLineStyle.fontMetrics().ascent(baselineType()));
         int letterDescent = canUseGlyphs ? glyphOverflow->bottom : (box.isRootInlineBox() ? 0 : boxLineStyle.fontMetrics().descent(baselineType()));
         setAscentAndDescent(ascent, descent, letterAscent, letterDescent, ascentDescentSet);
@@ -1100,9 +1082,8 @@ bool RootInlineBox::includeFontForBox(InlineBox& box) const
     if (!box.behavesLikeText() && is<InlineFlowBox>(box) && !downcast<InlineFlowBox>(box).hasTextChildren())
         return false;
 
-    // For now map "glyphs" to "font" in vertical text mode until the bounds returned by glyphs aren't garbage.
     LineBoxContain lineBoxContain = renderer().style().lineBoxContain();
-    return (lineBoxContain & LineBoxContainFont) || (!isHorizontal() && (lineBoxContain & LineBoxContainGlyphs));
+    return (lineBoxContain & LineBoxContainFont);
 }
 
 bool RootInlineBox::includeGlyphsForBox(InlineBox& box) const
@@ -1113,9 +1094,8 @@ bool RootInlineBox::includeGlyphsForBox(InlineBox& box) const
     if (!box.behavesLikeText() && is<InlineFlowBox>(box) && !downcast<InlineFlowBox>(box).hasTextChildren())
         return false;
 
-    // FIXME: We can't fit to glyphs yet for vertical text, since the bounds returned are garbage.
     LineBoxContain lineBoxContain = renderer().style().lineBoxContain();
-    return isHorizontal() && (lineBoxContain & LineBoxContainGlyphs);
+    return (lineBoxContain & LineBoxContainGlyphs);
 }
 
 bool RootInlineBox::includeInitialLetterForBox(InlineBox& box) const
@@ -1142,9 +1122,8 @@ bool RootInlineBox::includeMarginForBox(InlineBox& box) const
 
 bool RootInlineBox::fitsToGlyphs() const
 {
-    // FIXME: We can't fit to glyphs yet for vertical text, since the bounds returned are garbage.
     LineBoxContain lineBoxContain = renderer().style().lineBoxContain();
-    return isHorizontal() && ((lineBoxContain & LineBoxContainGlyphs) || (lineBoxContain & LineBoxContainInitialLetter));
+    return ((lineBoxContain & LineBoxContainGlyphs) || (lineBoxContain & LineBoxContainInitialLetter));
 }
 
 bool RootInlineBox::includesRootLineBoxFontOrLeading() const

@@ -30,6 +30,8 @@
 #include <wtf/Forward.h>
 #include <wtf/HashMap.h>
 #include <wtf/Lock.h>
+#include <wtf/ProcessID.h>
+#include <wtf/text/WTFString.h>
 
 #if PLATFORM(COCOA)
 #include "RemoteInspectorXPCConnection.h"
@@ -38,6 +40,14 @@
 OBJC_CLASS NSDictionary;
 OBJC_CLASS NSString;
 typedef RetainPtr<NSDictionary> TargetListing;
+#endif
+
+#if USE(GLIB)
+#include <wtf/glib/GRefPtr.h>
+typedef GRefPtr<GVariant> TargetListing;
+typedef struct _GCancellable GCancellable;
+typedef struct _GDBusConnection GDBusConnection;
+typedef struct _GDBusInterfaceVTable GDBusInterfaceVTable;
 #endif
 
 namespace Inspector {
@@ -58,11 +68,18 @@ public:
     public:
         struct Capabilities {
             bool remoteAutomationAllowed : 1;
+            String browserName;
+            String browserVersion;
         };
 
         virtual ~Client() { }
         virtual bool remoteAutomationAllowed() const = 0;
+        virtual String browserName() const { return { }; }
+        virtual String browserVersion() const { return { }; }
         virtual void requestAutomationSession(const String& sessionIdentifier) = 0;
+#if PLATFORM(COCOA)
+        virtual void requestAutomationSessionWithCapabilities(NSString *sessionIdentifier, NSDictionary *forwardedCapabilities) = 0;
+#endif
     };
 
     static void startDisabled();
@@ -74,8 +91,10 @@ public:
     void updateTarget(RemoteControllableTarget*);
     void sendMessageToRemote(unsigned targetIdentifier, const String& message);
 
-    void setRemoteInspectorClient(RemoteInspector::Client*);
+    RemoteInspector::Client* client() const { return m_client; }
+    void setClient(RemoteInspector::Client*);
     void clientCapabilitiesDidChange();
+    std::optional<RemoteInspector::Client::Capabilities> clientCapabilities() const { return m_clientCapabilities; }
 
     void setupFailed(unsigned targetIdentifier);
     void setupCompleted(unsigned targetIdentifier);
@@ -90,10 +109,18 @@ public:
 
 #if PLATFORM(COCOA)
     bool hasParentProcessInformation() const { return m_parentProcessIdentifier != 0; }
-    pid_t parentProcessIdentifier() const { return m_parentProcessIdentifier; }
+    ProcessID parentProcessIdentifier() const { return m_parentProcessIdentifier; }
     RetainPtr<CFDataRef> parentProcessAuditData() const { return m_parentProcessAuditData; }
-    void setParentProcessInformation(pid_t, RetainPtr<CFDataRef> auditData);
+    void setParentProcessInformation(ProcessID, RetainPtr<CFDataRef> auditData);
     void setParentProcessInfomationIsDelayed();
+#endif
+
+    void updateTargetListing(unsigned targetIdentifier);
+
+#if USE(GLIB)
+    void requestAutomationSession(const char* sessionID);
+    void setup(unsigned targetIdentifier);
+    void sendMessageToTarget(unsigned targetIdentifier, const char* message);
 #endif
 
 private:
@@ -107,6 +134,16 @@ private:
 #if PLATFORM(COCOA)
     void setupXPCConnectionIfNeeded();
 #endif
+#if USE(GLIB)
+    void setupConnection(GRefPtr<GDBusConnection>&&);
+    static const GDBusInterfaceVTable s_interfaceVTable;
+
+    void receivedGetTargetListMessage();
+    void receivedSetupMessage(unsigned targetIdentifier);
+    void receivedDataMessage(unsigned targetIdentifier, const char* message);
+    void receivedCloseMessage(unsigned targetIdentifier);
+    void receivedAutomationSessionRequestMessage(const char* sessionID);
+#endif
 
     TargetListing listingForTarget(const RemoteControllableTarget&) const;
     TargetListing listingForInspectionTarget(const RemoteInspectionTarget&) const;
@@ -115,7 +152,6 @@ private:
     void pushListingsNow();
     void pushListingsSoon();
 
-    void updateTargetListing(unsigned targetIdentifier);
     void updateTargetListing(const RemoteControllableTarget&);
 
     void updateHasActiveDebugSession();
@@ -155,6 +191,10 @@ private:
 #if PLATFORM(COCOA)
     RefPtr<RemoteInspectorXPCConnection> m_relayConnection;
 #endif
+#if USE(GLIB)
+    GRefPtr<GDBusConnection> m_dbusConnection;
+    GRefPtr<GCancellable> m_cancellable;
+#endif
 
     RemoteInspector::Client* m_client { nullptr };
     std::optional<RemoteInspector::Client::Capabilities> m_clientCapabilities;
@@ -168,7 +208,7 @@ private:
     bool m_hasActiveDebugSession { false };
     bool m_pushScheduled { false };
 
-    pid_t m_parentProcessIdentifier { 0 };
+    ProcessID m_parentProcessIdentifier { 0 };
 #if PLATFORM(COCOA)
     RetainPtr<CFDataRef> m_parentProcessAuditData;
 #endif

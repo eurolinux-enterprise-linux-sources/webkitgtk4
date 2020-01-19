@@ -34,6 +34,9 @@ public:
     WEBCORE_EXPORT static String activeInForegroundTabKey();
     WEBCORE_EXPORT static String activeInBackgroundTabOnlyKey();
     static String applicationCacheKey();
+#if ENABLE(APPLICATION_MANIFEST)
+    static String applicationManifestKey();
+#endif
     static String audioKey();
     WEBCORE_EXPORT static String backNavigationDeltaKey();
     WEBCORE_EXPORT static String cacheControlNoStoreKey();
@@ -46,10 +49,16 @@ public:
     static String deniedByClientKey();
     static String deviceMotionKey();
     static String deviceOrientationKey();
-    static String deviceProximityKey();
     static String diskCacheKey();
     static String diskCacheAfterValidationKey();
     static String documentLoaderStoppingKey();
+    WEBCORE_EXPORT static String domainCausingCrashKey();
+    static String domainCausingEnergyDrainKey();
+    WEBCORE_EXPORT static String domainCausingJetsamKey();
+    WEBCORE_EXPORT static String simulatedPageCrashKey();
+    WEBCORE_EXPORT static String exceededActiveMemoryLimitKey();
+    WEBCORE_EXPORT static String exceededInactiveMemoryLimitKey();
+    WEBCORE_EXPORT static String exceededBackgroundCPULimitKey();
     static String domainVisitedKey();
     static String engineFailedToLoadKey();
     WEBCORE_EXPORT static String entryRightlyNotWarmedUpKey();
@@ -121,6 +130,7 @@ public:
     static String redirectKey();
     static String reloadFromOriginKey();
     static String reloadKey();
+    static String reloadRevalidatingExpiredKey();
     static String replaceKey();
     static String resourceLoadedKey();
     static String resourceResponseSourceKey();
@@ -129,6 +139,7 @@ public:
     WEBCORE_EXPORT static String revalidatingKey();
     static String sameLoadKey();
     static String scriptKey();
+    static String serviceWorkerKey();
     WEBCORE_EXPORT static String streamingMedia();
     static String styleSheetKey();
     WEBCORE_EXPORT static String successfulSpeculativeWarmupWithRevalidationKey();
@@ -164,6 +175,8 @@ public:
     WEBCORE_EXPORT static String memoryUsageToDiagnosticLoggingKey(uint64_t memoryUsage);
     WEBCORE_EXPORT static String foregroundCPUUsageToDiagnosticLoggingKey(double cpuUsage);
     WEBCORE_EXPORT static String backgroundCPUUsageToDiagnosticLoggingKey(double cpuUsage);
+    
+    WEBCORE_EXPORT static String resourceLoadStatisticsTelemetryKey();
 };
 
 } // namespace WebCore

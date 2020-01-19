@@ -48,13 +48,7 @@ class CppBackendDispatcherImplementationGenerator(CppGenerator):
         return filter(lambda domain: len(self.commands_for_domain(domain)) > 0, Generator.domains_to_generate(self))
 
     def generate_output(self):
-        secondary_headers = [
-            '<inspector/InspectorFrontendRouter.h>',
-            '<inspector/InspectorValues.h>',
-            '<wtf/NeverDestroyed.h>',
-            '<wtf/text/CString.h>']
-
-        secondary_includes = ['#include %s' % header for header in secondary_headers]
+        secondary_includes = self._generate_secondary_header_includes()
 
         if self.model().framework.setting('alternate_dispatchers', False):
             secondary_includes.append('')
@@ -76,6 +70,17 @@ class CppBackendDispatcherImplementationGenerator(CppGenerator):
         return "\n\n".join(sections)
 
     # Private methods.
+
+    def _generate_secondary_header_includes(self):
+        header_includes = [
+            (["JavaScriptCore", "WebKit"], ("JavaScriptCore", "inspector/InspectorFrontendRouter.h")),
+            (["JavaScriptCore", "WebKit"], ("WTF", "wtf/JSONValues.h")),
+            (["JavaScriptCore", "WebKit"], ("WTF", "wtf/NeverDestroyed.h")),
+            (["JavaScriptCore", "WebKit"], ("WTF", "wtf/text/CString.h"))
+        ]
+
+        return self.generate_includes_from_entries(header_includes)
+
 
     def _generate_handler_class_destructor_for_domain(self, domain):
         destructor_args = {
@@ -277,9 +282,9 @@ class CppBackendDispatcherImplementationGenerator(CppGenerator):
 
         lines = []
         if len(command.call_parameters) == 0:
-            lines.append('void %(domainName)sBackendDispatcher::%(commandName)s(long requestId, RefPtr<InspectorObject>&&)' % command_args)
+            lines.append('void %(domainName)sBackendDispatcher::%(commandName)s(long requestId, RefPtr<JSON::Object>&&)' % command_args)
         else:
-            lines.append('void %(domainName)sBackendDispatcher::%(commandName)s(long requestId, RefPtr<InspectorObject>&& parameters)' % command_args)
+            lines.append('void %(domainName)sBackendDispatcher::%(commandName)s(long requestId, RefPtr<JSON::Object>&& parameters)' % command_args)
         lines.append('{')
 
         if len(command.call_parameters) > 0:
@@ -295,7 +300,7 @@ class CppBackendDispatcherImplementationGenerator(CppGenerator):
             lines.append('')
 
         lines.append('    ErrorString error;')
-        lines.append('    Ref<InspectorObject> result = InspectorObject::create();')
+        lines.append('    Ref<JSON::Object> result = JSON::Object::create();')
         if command.is_async:
             lines.append('    Ref<%(domainName)sBackendDispatcherHandler::%(callbackName)s> callback = adoptRef(*new %(domainName)sBackendDispatcherHandler::%(callbackName)s(m_backendDispatcher.copyRef(), requestId));' % command_args)
         if len(command.return_parameters) > 0:
@@ -317,7 +322,7 @@ class CppBackendDispatcherImplementationGenerator(CppGenerator):
 
         if not command.is_async:
             lines.append('    if (!error.length())')
-            lines.append('        m_backendDispatcher->sendResponse(requestId, WTFMove(result));')
+            lines.append('        m_backendDispatcher->sendResponse(requestId, WTFMove(result), false);')
             lines.append('    else')
             lines.append('        m_backendDispatcher->reportProtocolError(BackendDispatcher::ServerError, WTFMove(error));')
         lines.append('}')

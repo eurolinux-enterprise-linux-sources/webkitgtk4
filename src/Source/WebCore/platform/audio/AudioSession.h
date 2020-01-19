@@ -26,11 +26,10 @@
 #ifndef AudioSession_h
 #define AudioSession_h
 
-#include "PlatformExportMacros.h"
-
 #if USE(AUDIO_SESSION)
 
 #include <memory>
+#include <wtf/HashSet.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/Noncopyable.h>
 
@@ -53,12 +52,13 @@ public:
         AudioProcessing,
     };
     WEBCORE_EXPORT void setCategory(CategoryType);
-    CategoryType category() const;
+    WEBCORE_EXPORT CategoryType category() const;
 
     void setCategoryOverride(CategoryType);
     CategoryType categoryOverride() const;
 
     float sampleRate() const;
+    size_t bufferSize() const;
     size_t numberOfOutputChannels() const;
 
     bool tryToSetActive(bool);
@@ -66,12 +66,26 @@ public:
     size_t preferredBufferSize() const;
     void setPreferredBufferSize(size_t);
 
+    class MutedStateObserver {
+    public:
+        virtual ~MutedStateObserver() = default;
+
+        virtual void hardwareMutedStateDidChange(AudioSession*) = 0;
+    };
+
+    void addMutedStateObserver(MutedStateObserver*);
+    void removeMutedStateObserver(MutedStateObserver*);
+
+    bool isMuted() const;
+    void handleMutedStateChange();
+
 private:
     friend class NeverDestroyed<AudioSession>;
     AudioSession();
     ~AudioSession();
 
     std::unique_ptr<AudioSessionPrivate> m_private;
+    HashSet<MutedStateObserver*> m_observers;
 };
 
 }

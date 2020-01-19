@@ -31,7 +31,6 @@
 
 #include "Length.h"
 #include "LengthSize.h"
-#include "RenderStyleConstants.h"
 #include "WindRule.h"
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
@@ -47,7 +46,7 @@ class SVGPathByteStream;
 
 class BasicShape : public RefCounted<BasicShape> {
 public:
-    virtual ~BasicShape() { }
+    virtual ~BasicShape() = default;
 
     enum Type {
         BasicShapePolygonType,

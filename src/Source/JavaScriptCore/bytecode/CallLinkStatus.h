@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,10 +28,7 @@
 #include "CallLinkInfo.h"
 #include "CallVariant.h"
 #include "CodeOrigin.h"
-#include "CodeSpecializationKind.h"
 #include "ConcurrentJSLock.h"
-#include "ExitingJITType.h"
-#include "Intrinsic.h"
 #include "JSCJSValue.h"
 
 namespace JSC {
@@ -70,7 +67,7 @@ public:
         bool takesSlowPath { false };
         bool badFunction { false };
     };
-    static ExitSiteData computeExitSiteData(const ConcurrentJSLocker&, CodeBlock*, unsigned bytecodeIndex);
+    static ExitSiteData computeExitSiteData(CodeBlock*, unsigned bytecodeIndex);
     
 #if ENABLE(JIT)
     // Computes the status assuming that we never took slow path and never previously

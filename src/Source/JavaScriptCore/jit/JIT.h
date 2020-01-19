@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2012-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,18 +27,10 @@
 
 #if ENABLE(JIT)
 
-// We've run into some problems where changing the size of the class JIT leads to
-// performance fluctuations.  Try forcing alignment in an attempt to stabalize this.
-#if COMPILER(GCC_OR_CLANG)
-#define JIT_CLASS_ALIGNMENT __attribute__ ((aligned (32)))
-#else
-#define JIT_CLASS_ALIGNMENT
-#endif
-
 #define ASSERT_JIT_OFFSET(actual, expected) ASSERT_WITH_MESSAGE(actual == expected, "JIT Offset \"%s\" should be %d, not %d.\n", #expected, static_cast<int>(expected), static_cast<int>(actual));
 
 #include "CodeBlock.h"
-#include "CompactJITCodeMap.h"
+#include "CommonSlowPaths.h"
 #include "JITDisassembler.h"
 #include "JITInlineCacheGenerator.h"
 #include "JITMathIC.h"
@@ -57,7 +49,7 @@ namespace JSC {
     class JIT;
     class Identifier;
     class Interpreter;
-    class MarkedAllocator;
+    class BlockDirectory;
     class Register;
     class StructureChain;
     class StructureStubInfo;
@@ -176,7 +168,9 @@ namespace JSC {
 
     void ctiPatchCallByReturnAddress(ReturnAddressPtr, FunctionPtr newCalleeFunction);
 
-    class JIT : private JSInterfaceJIT {
+    // We've run into some problems where changing the size of the class JIT leads to
+    // performance fluctuations. Try forcing alignment in an attempt to stabilize this.
+    class alignas(32) JIT : private JSInterfaceJIT {
         friend class JITSlowPathCall;
         friend class JITStubCall;
 
@@ -246,12 +240,10 @@ namespace JSC {
             jit.privateCompileHasIndexedProperty(byValInfo, returnAddress, arrayMode);
         }
 
-        static CodeRef compileCTINativeCall(VM*, NativeFunction);
-
         static unsigned frameRegisterCountFor(CodeBlock*);
         static int stackPointerOffsetFor(CodeBlock*);
 
-        JS_EXPORT_PRIVATE static HashMap<CString, double> compileTimeStats();
+        JS_EXPORT_PRIVATE static HashMap<CString, Seconds> compileTimeStats();
 
     private:
         void privateCompileMainPass();
@@ -266,8 +258,6 @@ namespace JSC {
 
         void privateCompileHasIndexedProperty(ByValInfo*, ReturnAddressPtr, JITArrayMode);
 
-        Label privateCompileCTINativeCall(VM*, bool isConstruct = false);
-        CodeRef privateCompileCTINativeCall(VM*, NativeFunction);
         void privateCompilePatchGetArrayLength(ReturnAddressPtr returnAddress);
 
         // Add a call out from JIT code, without an exception check.
@@ -294,12 +284,12 @@ namespace JSC {
 
         void exceptionCheck()
         {
-            m_exceptionChecks.append(emitExceptionCheck());
+            m_exceptionChecks.append(emitExceptionCheck(*vm()));
         }
 
         void exceptionCheckWithCallFrameRollback()
         {
-            m_exceptionChecksWithCallFrameRollback.append(emitExceptionCheck());
+            m_exceptionChecksWithCallFrameRollback.append(emitExceptionCheck(*vm()));
         }
 
         void privateCompileExceptionHandlers();
@@ -335,7 +325,7 @@ namespace JSC {
 
         // This assumes that the value to profile is in regT0 and that regT3 is available for
         // scratch.
-        void emitValueProfilingSite(ValueProfile*);
+        void emitValueProfilingSite(ValueProfile&);
         void emitValueProfilingSite(unsigned bytecodeOffset);
         void emitValueProfilingSite();
         void emitArrayProfilingSiteWithCell(RegisterID cell, RegisterID indexingType, ArrayProfile*);
@@ -461,6 +451,8 @@ namespace JSC {
 #endif // USE(JSVALUE32_64)
 
         void emit_compareAndJump(OpcodeID, int op1, int op2, unsigned target, RelationalCondition);
+        void emit_compareUnsigned(int dst, int op1, int op2, RelationalCondition);
+        void emit_compareUnsignedAndJump(int op1, int op2, unsigned target, RelationalCondition);
         void emit_compareAndJumpSlow(int op1, int op2, unsigned target, DoubleCondition, size_t (JIT_OPERATION *operation)(ExecState*, EncodedJSValue, EncodedJSValue), bool invert, Vector<SlowCaseEntry>::iterator&);
         
         void assertStackPointerOffset();
@@ -480,15 +472,11 @@ namespace JSC {
         void emit_op_construct(Instruction*);
         void emit_op_create_this(Instruction*);
         void emit_op_to_this(Instruction*);
-        void emit_op_create_direct_arguments(Instruction*);
-        void emit_op_create_scoped_arguments(Instruction*);
-        void emit_op_create_cloned_arguments(Instruction*);
         void emit_op_get_argument(Instruction*);
         void emit_op_argument_count(Instruction*);
-        void emit_op_create_rest(Instruction*);
         void emit_op_get_rest_length(Instruction*);
         void emit_op_check_tdz(Instruction*);
-        void emit_op_assert(Instruction*);
+        void emit_op_identity_with_profile(Instruction*);
         void emit_op_debug(Instruction*);
         void emit_op_del_by_id(Instruction*);
         void emit_op_del_by_val(Instruction*);
@@ -498,10 +486,12 @@ namespace JSC {
         void emit_op_get_scope(Instruction*);
         void emit_op_eq(Instruction*);
         void emit_op_eq_null(Instruction*);
+        void emit_op_below(Instruction*);
+        void emit_op_beloweq(Instruction*);
         void emit_op_try_get_by_id(Instruction*);
         void emit_op_get_by_id(Instruction*);
         void emit_op_get_by_id_with_this(Instruction*);
-        void emit_op_get_by_val_with_this(Instruction*);
+        void emit_op_get_by_id_direct(Instruction*);
         void emit_op_get_arguments_length(Instruction*);
         void emit_op_get_by_val(Instruction*);
         void emit_op_get_argument_by_val(Instruction*);
@@ -528,10 +518,14 @@ namespace JSC {
         void emit_op_jnlesseq(Instruction*);
         void emit_op_jngreater(Instruction*);
         void emit_op_jngreatereq(Instruction*);
+        void emit_op_jbelow(Instruction*);
+        void emit_op_jbeloweq(Instruction*);
         void emit_op_jtrue(Instruction*);
         void emit_op_loop_hint(Instruction*);
-        void emit_op_watchdog(Instruction*);
+        void emit_op_check_traps(Instruction*);
         void emit_op_nop(Instruction*);
+        void emit_op_super_sampler_begin(Instruction*);
+        void emit_op_super_sampler_end(Instruction*);
         void emit_op_lshift(Instruction*);
         void emit_op_mod(Instruction*);
         void emit_op_mov(Instruction*);
@@ -541,43 +535,34 @@ namespace JSC {
         void emit_op_neq_null(Instruction*);
         void emit_op_new_array(Instruction*);
         void emit_op_new_array_with_size(Instruction*);
-        void emit_op_new_array_buffer(Instruction*);
-        void emit_op_new_array_with_spread(Instruction*);
-        void emit_op_spread(Instruction*);
         void emit_op_new_func(Instruction*);
         void emit_op_new_func_exp(Instruction*);
         void emit_op_new_generator_func(Instruction*);
         void emit_op_new_generator_func_exp(Instruction*);
         void emit_op_new_async_func(Instruction*);
         void emit_op_new_async_func_exp(Instruction*);
+        void emit_op_new_async_generator_func(Instruction*);
+        void emit_op_new_async_generator_func_exp(Instruction*);
         void emit_op_new_object(Instruction*);
         void emit_op_new_regexp(Instruction*);
         void emit_op_not(Instruction*);
         void emit_op_nstricteq(Instruction*);
         void emit_op_dec(Instruction*);
         void emit_op_inc(Instruction*);
-        void emit_op_pow(Instruction*);
         void emit_op_profile_type(Instruction*);
         void emit_op_profile_control_flow(Instruction*);
-        void emit_op_push_with_scope(Instruction*);
-        void emit_op_create_lexical_environment(Instruction*);
         void emit_op_get_parent_scope(Instruction*);
         void emit_op_put_by_id(Instruction*);
-        void emit_op_put_by_id_with_this(Instruction*);
         void emit_op_put_by_index(Instruction*);
         void emit_op_put_by_val(Instruction*);
-        void emit_op_put_by_val_with_this(Instruction*);
         void emit_op_put_getter_by_id(Instruction*);
         void emit_op_put_setter_by_id(Instruction*);
         void emit_op_put_getter_setter_by_id(Instruction*);
         void emit_op_put_getter_by_val(Instruction*);
         void emit_op_put_setter_by_val(Instruction*);
-        void emit_op_define_data_property(Instruction*);
-        void emit_op_define_accessor_property(Instruction*);
         void emit_op_ret(Instruction*);
         void emit_op_rshift(Instruction*);
         void emit_op_set_function_name(Instruction*);
-        void emit_op_strcat(Instruction*);
         void emit_op_stricteq(Instruction*);
         void emit_op_sub(Instruction*);
         void emit_op_switch_char(Instruction*);
@@ -585,29 +570,22 @@ namespace JSC {
         void emit_op_switch_string(Instruction*);
         void emit_op_tear_off_arguments(Instruction*);
         void emit_op_throw(Instruction*);
-        void emit_op_throw_static_error(Instruction*);
         void emit_op_to_number(Instruction*);
         void emit_op_to_string(Instruction*);
+        void emit_op_to_object(Instruction*);
         void emit_op_to_primitive(Instruction*);
         void emit_op_unexpected_load(Instruction*);
         void emit_op_unsigned(Instruction*);
         void emit_op_urshift(Instruction*);
-        void emit_op_get_enumerable_length(Instruction*);
-        void emit_op_has_generic_property(Instruction*);
         void emit_op_has_structure_property(Instruction*);
         void emit_op_has_indexed_property(Instruction*);
         void emit_op_get_direct_pname(Instruction*);
-        void emit_op_get_property_enumerator(Instruction*);
         void emit_op_enumerator_structure_pname(Instruction*);
         void emit_op_enumerator_generic_pname(Instruction*);
-        void emit_op_to_index_string(Instruction*);
         void emit_op_log_shadow_chicken_prologue(Instruction*);
         void emit_op_log_shadow_chicken_tail(Instruction*);
 
         void emitSlow_op_add(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_bitand(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_bitor(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_bitxor(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_call(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_tail_call(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_call_eval(Instruction*, Vector<SlowCaseEntry>::iterator&);
@@ -616,14 +594,12 @@ namespace JSC {
         void emitSlow_op_tail_call_forward_arguments(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_construct_varargs(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_construct(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_to_this(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_create_this(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_check_tdz(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_div(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_eq(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_get_callee(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_try_get_by_id(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_get_by_id(Instruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_get_by_id_with_this(Instruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_get_by_id_direct(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_get_arguments_length(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_get_by_val(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_get_argument_by_val(Instruction*, Vector<SlowCaseEntry>::iterator&);
@@ -639,39 +615,26 @@ namespace JSC {
         void emitSlow_op_jngreatereq(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_jtrue(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_loop_hint(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_watchdog(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_lshift(Instruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_check_traps(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_mod(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_mul(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_negate(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_neq(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_new_object(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_not(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_nstricteq(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_dec(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_inc(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_put_by_id(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_put_by_val(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_rshift(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_stricteq(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_sub(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_to_number(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_to_string(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_to_primitive(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_unsigned(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_urshift(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_has_indexed_property(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_has_structure_property(Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_get_direct_pname(Instruction*, Vector<SlowCaseEntry>::iterator&);
 
         void emit_op_resolve_scope(Instruction*);
         void emit_op_get_from_scope(Instruction*);
         void emit_op_put_to_scope(Instruction*);
         void emit_op_get_from_arguments(Instruction*);
         void emit_op_put_to_arguments(Instruction*);
-        void emitSlow_op_resolve_scope(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_get_from_scope(Instruction*, Vector<SlowCaseEntry>::iterator&);
         void emitSlow_op_put_to_scope(Instruction*, Vector<SlowCaseEntry>::iterator&);
+
+        void emitSlowCaseCall(Instruction*, Vector<SlowCaseEntry>::iterator&, SlowPathFunction);
 
         void emitRightShift(Instruction*, bool isUnsigned);
         void emitRightShiftSlowCase(Instruction*, Vector<SlowCaseEntry>::iterator&, bool isUnsigned);
@@ -732,6 +695,11 @@ namespace JSC {
         void linkAllSlowCasesForBytecodeOffset(Vector<SlowCaseEntry>& slowCases,
             Vector<SlowCaseEntry>::iterator&, unsigned bytecodeOffset);
 
+        void linkAllSlowCases(Vector<SlowCaseEntry>::iterator& iter)
+        {
+            linkAllSlowCasesForBytecodeOffset(m_slowCases, iter, m_bytecodeOffset);
+        }
+
         MacroAssembler::Call appendCallWithExceptionCheck(const FunctionPtr&);
 #if OS(WINDOWS) && CPU(X86_64)
         MacroAssembler::Call appendCallWithExceptionCheckAndSlowPathReturnType(const FunctionPtr&);
@@ -747,6 +715,7 @@ namespace JSC {
         MacroAssembler::Call callOperation(C_JITOperation_EL, GPRReg);
         MacroAssembler::Call callOperation(C_JITOperation_EL, TrustedImmPtr);
         MacroAssembler::Call callOperation(C_JITOperation_ESt, Structure*);
+        MacroAssembler::Call callOperation(C_JITOperation_EC, JSCell*);
         MacroAssembler::Call callOperation(C_JITOperation_EZ, int32_t);
         MacroAssembler::Call callOperation(Z_JITOperation_EJZZ, GPRReg, int32_t, int32_t);
         MacroAssembler::Call callOperation(J_JITOperation_E, int);
@@ -760,9 +729,11 @@ namespace JSC {
 #if USE(JSVALUE64)
         MacroAssembler::Call callOperation(J_JITOperation_ESsiJI, int, StructureStubInfo*, GPRReg, UniquedStringImpl*);
         MacroAssembler::Call callOperation(WithProfileTag, J_JITOperation_ESsiJI, int, StructureStubInfo*, GPRReg, UniquedStringImpl*);
+        MacroAssembler::Call callOperation(WithProfileTag, J_JITOperation_ESsiJJI, int, StructureStubInfo*, GPRReg, GPRReg, UniquedStringImpl*);
 #else
         MacroAssembler::Call callOperation(J_JITOperation_ESsiJI, int, StructureStubInfo*, GPRReg, GPRReg, UniquedStringImpl*);
         MacroAssembler::Call callOperation(WithProfileTag, J_JITOperation_ESsiJI, int, StructureStubInfo*, GPRReg, GPRReg, UniquedStringImpl*);
+        MacroAssembler::Call callOperation(WithProfileTag, J_JITOperation_ESsiJJI, int, StructureStubInfo*, GPRReg, GPRReg, GPRReg, GPRReg, UniquedStringImpl*);
 #endif
         MacroAssembler::Call callOperation(J_JITOperation_EJI, int, GPRReg, UniquedStringImpl*);
         MacroAssembler::Call callOperation(J_JITOperation_EJJ, int, GPRReg, GPRReg);
@@ -791,6 +762,7 @@ namespace JSC {
         MacroAssembler::Call callOperation(J_JITOperation_EZZ, int, int32_t, int32_t);
         MacroAssembler::Call callOperation(P_JITOperation_E);
         MacroAssembler::Call callOperation(P_JITOperation_EJS, GPRReg, size_t);
+        MacroAssembler::Call callOperation(P_JITOperation_EUi, uint32_t);
         MacroAssembler::Call callOperation(S_JITOperation_ECC, RegisterID, RegisterID);
         MacroAssembler::Call callOperation(S_JITOperation_EJ, RegisterID);
         MacroAssembler::Call callOperation(S_JITOperation_EJI, GPRReg, UniquedStringImpl*);
@@ -927,12 +899,13 @@ namespace JSC {
         Instruction* copiedInstruction(Instruction*);
 
         Interpreter* m_interpreter;
-        
-        RefCountedArray<Instruction> m_instructions;
+
+        PoisonedRefCountedArray<CodeBlockPoison, Instruction> m_instructions;
 
         Vector<CallRecord> m_calls;
         Vector<Label> m_labels;
         Vector<JITGetByIdGenerator> m_getByIds;
+        Vector<JITGetByIdWithThisGenerator> m_getByIdsWithThis;
         Vector<JITPutByIdGenerator> m_putByIds;
         Vector<ByValCompilationInfo> m_byValCompilationInfo;
         Vector<CallCompilationInfo> m_callCompilationInfo;
@@ -947,6 +920,7 @@ namespace JSC {
         Label m_exceptionHandler;
 
         unsigned m_getByIdIndex;
+        unsigned m_getByIdWithThisIndex;
         unsigned m_putByIdIndex;
         unsigned m_byValInstructionIndex;
         unsigned m_callLinkInfoIndex;
@@ -956,7 +930,6 @@ namespace JSC {
 
         std::unique_ptr<JITDisassembler> m_disassembler;
         RefPtr<Profiler::Compilation> m_compilation;
-        WeakRandom m_randomGenerator;
         static CodeRef stringGetByValStubGenerator(VM*);
 
         PCToCodeOriginMapBuilder m_pcToCodeOriginMapBuilder;
@@ -967,8 +940,9 @@ namespace JSC {
         bool m_canBeOptimized;
         bool m_canBeOptimizedOrInlined;
         bool m_shouldEmitProfiling;
+        bool m_shouldUseIndexMasking;
         unsigned m_loopOSREntryBytecodeOffset { 0 };
-    } JIT_CLASS_ALIGNMENT;
+    };
 
 } // namespace JSC
 

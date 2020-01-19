@@ -41,11 +41,14 @@
 #include "HTTPHeaderNames.h"
 #include "InspectorInstrumentation.h"
 #include "ManifestParser.h"
+#include "NavigationScheduler.h"
+#include "NetworkLoadMetrics.h"
 #include "Page.h"
 #include "ProgressTracker.h"
 #include "ResourceHandle.h"
 #include "SecurityOrigin.h"
 #include "Settings.h"
+#include <wtf/CompletionHandler.h>
 #include <wtf/HashMap.h>
 #include <wtf/MainThread.h>
 
@@ -459,7 +462,7 @@ void ApplicationCacheGroup::abort(Frame& frame)
 RefPtr<ResourceHandle> ApplicationCacheGroup::createResourceHandle(const URL& url, ApplicationCacheResource* newestCachedResource)
 {
     ResourceRequest request(url);
-    m_frame->loader().applyUserAgent(request);
+    m_frame->loader().applyUserAgentIfNeeded(request);
     request.setHTTPHeaderField(HTTPHeaderName::CacheControl, "max-age=0");
 
     if (newestCachedResource) {
@@ -473,7 +476,10 @@ RefPtr<ResourceHandle> ApplicationCacheGroup::createResourceHandle(const URL& ur
         }
     }
 
-    RefPtr<ResourceHandle> handle = ResourceHandle::create(m_frame->loader().networkingContext(), request, this, false, true);
+    bool defersLoading = false;
+    bool shouldContentSniff = true;
+    bool shouldContentEncodingSniff = true;
+    RefPtr<ResourceHandle> handle = ResourceHandle::create(m_frame->loader().networkingContext(), request, this, defersLoading, shouldContentSniff, shouldContentEncodingSniff);
 
     // Because willSendRequest only gets called during redirects, we initialize
     // the identifier and the first willSendRequest here.
@@ -483,13 +489,14 @@ RefPtr<ResourceHandle> ApplicationCacheGroup::createResourceHandle(const URL& ur
     return handle;
 }
 
-void ApplicationCacheGroup::didReceiveResponse(ResourceHandle* handle, ResourceResponse&& response)
+void ApplicationCacheGroup::didReceiveResponseAsync(ResourceHandle* handle, ResourceResponse&& response, CompletionHandler<void()>&& completionHandler)
 {
     ASSERT(m_frame);
     InspectorInstrumentation::didReceiveResourceResponse(*m_frame, m_currentResourceIdentifier, m_frame->loader().documentLoader(), response, nullptr);
 
     if (handle == m_manifestHandle) {
         didReceiveManifestResponse(response);
+        completionHandler();
         return;
     }
 
@@ -516,6 +523,7 @@ void ApplicationCacheGroup::didReceiveResponse(ResourceHandle* handle, ResourceR
             m_currentHandle = nullptr;
             // Load the next resource, if any.
             startLoadingEntry();
+            completionHandler();
             return;
         }
         // The server could return 304 for an unconditional request - in this case, we handle the response as a normal error.
@@ -547,11 +555,25 @@ void ApplicationCacheGroup::didReceiveResponse(ResourceHandle* handle, ResourceR
             // Load the next resource, if any.
             startLoadingEntry();
         }
+        completionHandler();
         return;
     }
     
     m_currentResource = ApplicationCacheResource::create(url, response, type);
+    completionHandler();
 }
+
+void ApplicationCacheGroup::willSendRequestAsync(ResourceHandle*, ResourceRequest&& request, ResourceResponse&&, CompletionHandler<void(ResourceRequest&&)>&& completionHandler)
+{
+    completionHandler(WTFMove(request));
+}
+
+#if USE(PROTECTION_SPACE_AUTH_CALLBACK)
+void ApplicationCacheGroup::canAuthenticateAgainstProtectionSpaceAsync(ResourceHandle* handle, const ProtectionSpace&)
+{
+    handle->continueCanAuthenticateAgainstProtectionSpace(false);
+}
+#endif
 
 void ApplicationCacheGroup::didReceiveData(ResourceHandle* handle, const char* data, unsigned length, int encodedDataLength)
 {
@@ -570,9 +592,11 @@ void ApplicationCacheGroup::didReceiveData(ResourceHandle* handle, const char* d
     m_currentResource->data().append(data, length);
 }
 
-void ApplicationCacheGroup::didFinishLoading(ResourceHandle* handle, double finishTime)
+void ApplicationCacheGroup::didFinishLoading(ResourceHandle* handle)
 {
-    InspectorInstrumentation::didFinishLoading(m_frame, m_frame->loader().documentLoader(), m_currentResourceIdentifier, finishTime);
+    // FIXME: We should have NetworkLoadMetrics for ApplicationCache loads.
+    NetworkLoadMetrics emptyMetrics;
+    InspectorInstrumentation::didFinishLoading(m_frame, m_frame->loader().documentLoader(), m_currentResourceIdentifier, emptyMetrics, nullptr);
 
     if (handle == m_manifestHandle) {
         didFinishLoadingManifest();
@@ -709,7 +733,7 @@ void ApplicationCacheGroup::didFinishLoadingManifest()
     }
     
     Manifest manifest;
-    if (!parseManifest(m_manifestURL, m_manifestResource->data().data(), m_manifestResource->data().size(), manifest)) {
+    if (!parseManifest(m_manifestURL, m_manifestResource->response().mimeType(), m_manifestResource->data().data(), m_manifestResource->data().size(), manifest)) {
         // At the time of this writing, lack of "CACHE MANIFEST" signature is the only reason for parseManifest to fail.
         m_frame->document()->addConsoleMessage(MessageSource::AppCache, MessageLevel::Error, ASCIILiteral("Application Cache manifest could not be parsed. Does it start with CACHE MANIFEST?"));
         cacheUpdateFailed();
@@ -926,9 +950,7 @@ void ApplicationCacheGroup::checkIfLoadIsComplete()
             // some other cache in this group. They are not associated with the failed new cache.
 
             // Need to copy loaders, because the cache group may be destroyed at the end of iteration.
-            Vector<DocumentLoader*> loaders;
-            copyToVector(m_pendingMasterResourceLoaders, loaders);
-            for (auto& loader : loaders)
+            for (auto& loader : copyToVector(m_pendingMasterResourceLoaders))
                 disassociateDocumentLoader(*loader); // This can delete this group.
 
             // Reinstate the oldNewestCache, if there was one.
@@ -975,8 +997,7 @@ void ApplicationCacheGroup::startLoadingEntry()
 void ApplicationCacheGroup::deliverDelayedMainResources()
 {
     // Need to copy loaders, because the cache group may be destroyed at the end of iteration.
-    Vector<DocumentLoader*> loaders;
-    copyToVector(m_pendingMasterResourceLoaders, loaders);
+    auto loaders = copyToVector(m_pendingMasterResourceLoaders);
     for (auto* loader : loaders) {
         if (loader->isLoadingMainResource())
             continue;
@@ -1051,7 +1072,7 @@ void ApplicationCacheGroup::scheduleReachedMaxAppCacheSizeCallback()
 {
     ASSERT(isMainThread());
     auto* timer = new ChromeClientCallbackTimer(*this);
-    timer->startOneShot(0);
+    timer->startOneShot(0_s);
     // The timer will delete itself once it fires.
 }
 

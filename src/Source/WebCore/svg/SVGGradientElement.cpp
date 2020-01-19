@@ -63,14 +63,13 @@ SVGGradientElement::SVGGradientElement(const QualifiedName& tagName, Document& d
 
 bool SVGGradientElement::isSupportedAttribute(const QualifiedName& attrName)
 {
-    static NeverDestroyed<HashSet<QualifiedName>> supportedAttributes;
-    if (supportedAttributes.get().isEmpty()) {
-        SVGURIReference::addSupportedAttributes(supportedAttributes);
-        SVGExternalResourcesRequired::addSupportedAttributes(supportedAttributes);
-        supportedAttributes.get().add(SVGNames::gradientUnitsAttr);
-        supportedAttributes.get().add(SVGNames::gradientTransformAttr);
-        supportedAttributes.get().add(SVGNames::spreadMethodAttr);
-    }
+    static const auto supportedAttributes = makeNeverDestroyed([] {
+        HashSet<QualifiedName> set;
+        SVGURIReference::addSupportedAttributes(set);
+        SVGExternalResourcesRequired::addSupportedAttributes(set);
+        set.add({ SVGNames::gradientUnitsAttr.get(), SVGNames::gradientTransformAttr.get(), SVGNames::spreadMethodAttr.get() });
+        return set;
+    }());
     return supportedAttributes.get().contains<SVGAttributeHashTranslator>(attrName);
 }
 
@@ -120,7 +119,7 @@ void SVGGradientElement::childrenChanged(const ChildChange& change)
 {
     SVGElement::childrenChanged(change);
 
-    if (change.source == ChildChangeSourceParser)
+    if (change.source == ChildChangeSource::Parser)
         return;
 
     if (RenderObject* object = renderer())
@@ -135,17 +134,12 @@ Vector<Gradient::ColorStop> SVGGradientElement::buildStops()
     for (auto& stop : childrenOfType<SVGStopElement>(*this)) {
         const Color& color = stop.stopColorIncludingOpacity();
 
-        // Figure out right monotonic offset
+        // Figure out right monotonic offset.
         float offset = stop.offset();
         offset = std::min(std::max(previousOffset, offset), 1.0f);
         previousOffset = offset;
 
-        // Extract individual channel values
-        // FIXME: Why doesn't ColorStop take a Color and an offset??
-        float r, g, b, a;
-        color.getRGBA(r, g, b, a);
-
-        stops.append(Gradient::ColorStop(offset, r, g, b, a));
+        stops.append(Gradient::ColorStop(offset, color));
     }
 
     return stops;

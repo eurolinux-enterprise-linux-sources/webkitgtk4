@@ -38,21 +38,20 @@
 #include "IDBValue.h"
 #include "IndexKey.h"
 #include "JSDOMBinding.h"
-#include "JSDOMConvert.h"
-#include "JSDOMStringList.h"
+#include "JSDOMConvertDate.h"
+#include "JSDOMConvertNullable.h"
 #include "Logging.h"
 #include "MessagePort.h"
 #include "ScriptExecutionContext.h"
 #include "SerializedScriptValue.h"
 #include "SharedBuffer.h"
 #include "ThreadSafeDataBuffer.h"
-#include <runtime/ArrayBuffer.h>
-#include <runtime/DateInstance.h>
-#include <runtime/ObjectConstructor.h>
-
-using namespace JSC;
+#include <JavaScriptCore/ArrayBuffer.h>
+#include <JavaScriptCore/DateInstance.h>
+#include <JavaScriptCore/ObjectConstructor.h>
 
 namespace WebCore {
+using namespace JSC;
 
 static bool get(ExecState& exec, JSValue object, const String& keyPathElement, JSValue& result)
 {

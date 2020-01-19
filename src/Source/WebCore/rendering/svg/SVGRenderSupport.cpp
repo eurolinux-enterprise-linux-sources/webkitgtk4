@@ -431,7 +431,7 @@ void SVGRenderSupport::applyStrokeStyleToContext(GraphicsContext* context, const
     context->setLineCap(style.capStyle());
     context->setLineJoin(style.joinStyle());
     if (style.joinStyle() == MiterJoin)
-        context->setMiterLimit(svgStyle.strokeMiterLimit());
+        context->setMiterLimit(style.strokeMiterLimit());
 
     const Vector<SVGLengthValue>& dashes = svgStyle.strokeDashArray();
     if (dashes.isEmpty())
@@ -485,7 +485,11 @@ void SVGRenderSupport::updateMaskedAncestorShouldIsolateBlending(const RenderEle
 
     bool maskedAncestorShouldIsolateBlending = renderer.style().hasBlendMode();
     for (auto* ancestor = renderer.element()->parentElement(); ancestor && ancestor->isSVGElement(); ancestor = ancestor->parentElement()) {
-        if (!downcast<SVGElement>(*ancestor).isSVGGraphicsElement() || !isolatesBlending(*ancestor->computedStyle()))
+        if (!downcast<SVGElement>(*ancestor).isSVGGraphicsElement())
+            continue;
+
+        const auto* style = ancestor->computedStyle();
+        if (!style || !isolatesBlending(*style))
             continue;
 
         if (ancestor->computedStyle()->svgStyle().hasMasker())

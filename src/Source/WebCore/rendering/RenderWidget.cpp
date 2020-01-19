@@ -32,10 +32,13 @@
 #include "RenderLayerBacking.h"
 #include "RenderView.h"
 #include "SecurityOrigin.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/StackStats.h>
 #include <wtf/Ref.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderWidget);
 
 static HashMap<const Widget*, RenderWidget*>& widgetRendererMap()
 {
@@ -81,7 +84,6 @@ static void moveWidgetToParentSoon(Widget& child, FrameView* parent)
 
 RenderWidget::RenderWidget(HTMLFrameOwnerElement& element, RenderStyle&& style)
     : RenderReplaced(element, WTFMove(style))
-    , m_weakPtrFactory(this)
 {
     setInline(false);
 }
@@ -129,7 +131,7 @@ bool RenderWidget::setWidgetGeometry(const LayoutRect& frame)
 
     m_clipRect = clipRect;
 
-    WeakPtr<RenderWidget> weakThis = createWeakPtr();
+    auto weakThis = makeWeakPtr(*this);
     // These calls *may* cause this renderer to disappear from underneath...
     if (boundsChanged)
         m_widget->setFrameRect(newFrameRect);
@@ -179,7 +181,7 @@ void RenderWidget::setWidget(RefPtr<Widget>&& widget)
         // widget immediately, but we have to have really been fully constructed.
         if (hasInitializedStyle()) {
             if (!needsLayout()) {
-                WeakPtr<RenderWidget> weakThis = createWeakPtr();
+                auto weakThis = makeWeakPtr(*this);
                 updateWidgetGeometry();
                 if (!weakThis)
                     return;
@@ -229,6 +231,13 @@ void RenderWidget::paintContents(PaintInfo& paintInfo, const LayoutPoint& paintO
     // to paint itself. That way it will composite properly with z-indexed layers.
     LayoutRect paintRect = paintInfo.rect;
 
+    PaintBehavior oldBehavior = PaintBehaviorNormal;
+    if (is<FrameView>(*m_widget) && (paintInfo.paintBehavior & PaintBehaviorTileFirstPaint)) {
+        FrameView& frameView = downcast<FrameView>(*m_widget);
+        oldBehavior = frameView.paintBehavior();
+        frameView.setPaintBehavior(oldBehavior | PaintBehaviorTileFirstPaint);
+    }
+
     IntPoint widgetLocation = m_widget->frameRect().location();
     IntSize widgetPaintOffset = contentPaintOffset - widgetLocation;
     // When painting widgets into compositing layers, tx and ty are relative to the enclosing compositing layer,
@@ -250,6 +259,8 @@ void RenderWidget::paintContents(PaintInfo& paintInfo, const LayoutPoint& paintO
             ASSERT(!paintInfo.overlapTestRequests->contains(this) || (paintInfo.overlapTestRequests->get(this) == m_widget->frameRect()));
             paintInfo.overlapTestRequests->set(this, m_widget->frameRect());
         }
+        if (paintInfo.paintBehavior & PaintBehaviorTileFirstPaint)
+            frameView.setPaintBehavior(oldBehavior);
     }
 }
 
@@ -314,7 +325,7 @@ RenderWidget::ChildWidgetState RenderWidget::updateWidgetPosition()
     if (!m_widget)
         return ChildWidgetState::Destroyed;
 
-    WeakPtr<RenderWidget> weakThis = createWeakPtr();
+    auto weakThis = makeWeakPtr(*this);
     bool widgetSizeChanged = updateWidgetGeometry();
     if (!weakThis || !m_widget)
         return ChildWidgetState::Destroyed;
@@ -324,8 +335,8 @@ RenderWidget::ChildWidgetState RenderWidget::updateWidgetPosition()
     if (is<FrameView>(*m_widget)) {
         FrameView& frameView = downcast<FrameView>(*m_widget);
         // Check the frame's page to make sure that the frame isn't in the process of being destroyed.
-        if ((widgetSizeChanged || frameView.needsLayout()) && frameView.frame().page())
-            frameView.layout();
+        if ((widgetSizeChanged || frameView.needsLayout()) && frameView.frame().page() && frameView.frame().document())
+            frameView.layoutContext().layout();
     }
     return ChildWidgetState::Valid;
 }
@@ -363,8 +374,8 @@ bool RenderWidget::nodeAtPoint(const HitTestRequest& request, HitTestResult& res
 
         bool isInsideChildFrame = childRoot.hitTest(newHitTestRequest, newHitTestLocation, childFrameResult);
 
-        if (newHitTestLocation.isRectBasedTest())
-            result.append(childFrameResult);
+        if (request.resultIsElementList())
+            result.append(childFrameResult, request);
         else if (isInsideChildFrame)
             result = childFrameResult;
 

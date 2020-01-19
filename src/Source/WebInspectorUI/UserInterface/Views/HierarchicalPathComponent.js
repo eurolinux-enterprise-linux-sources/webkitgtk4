@@ -23,7 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-WebInspector.HierarchicalPathComponent = class HierarchicalPathComponent extends WebInspector.Object
+WI.HierarchicalPathComponent = class HierarchicalPathComponent extends WI.Object
 {
     constructor(displayName, styleClassNames, representedObject, textOnly, showSelectorArrows)
     {
@@ -51,6 +51,7 @@ WebInspector.HierarchicalPathComponent = class HierarchicalPathComponent extends
 
         this._titleElement = document.createElement("div");
         this._titleElement.className = "title";
+        this._titleElement.setAttribute("dir", "auto");
         this._element.appendChild(this._titleElement);
 
         this._titleContentElement = document.createElement("div");
@@ -62,6 +63,7 @@ WebInspector.HierarchicalPathComponent = class HierarchicalPathComponent extends
         this._element.appendChild(this._separatorElement);
 
         this._selectElement = document.createElement("select");
+        this._selectElement.setAttribute("dir", "auto");
         this._selectElement.addEventListener("mouseover", this._selectElementMouseOver.bind(this));
         this._selectElement.addEventListener("mouseout", this._selectElementMouseOut.bind(this));
         this._selectElement.addEventListener("mousedown", this._selectElementMouseDown.bind(this));
@@ -131,10 +133,10 @@ WebInspector.HierarchicalPathComponent = class HierarchicalPathComponent extends
     get minimumWidth()
     {
         if (this._collapsed)
-            return WebInspector.HierarchicalPathComponent.MinimumWidthCollapsed;
+            return WI.HierarchicalPathComponent.MinimumWidthCollapsed;
         if (this._selectorArrows)
-            return WebInspector.HierarchicalPathComponent.MinimumWidth + WebInspector.HierarchicalPathComponent.SelectorArrowsWidth;
-        return WebInspector.HierarchicalPathComponent.MinimumWidth;
+            return WI.HierarchicalPathComponent.MinimumWidth + WI.HierarchicalPathComponent.SelectorArrowsWidth;
+        return WI.HierarchicalPathComponent.MinimumWidth;
     }
 
     get forcedWidth()
@@ -148,9 +150,9 @@ WebInspector.HierarchicalPathComponent = class HierarchicalPathComponent extends
     set forcedWidth(width)
     {
         if (typeof width === "number") {
-            let minimumWidthForOneCharacterTruncatedTitle = WebInspector.HierarchicalPathComponent.MinimumWidthForOneCharacterTruncatedTitle;
+            let minimumWidthForOneCharacterTruncatedTitle = WI.HierarchicalPathComponent.MinimumWidthForOneCharacterTruncatedTitle;
             if (this.selectorArrows)
-                minimumWidthForOneCharacterTruncatedTitle += WebInspector.HierarchicalPathComponent.SelectorArrowsWidth;
+                minimumWidthForOneCharacterTruncatedTitle += WI.HierarchicalPathComponent.SelectorArrowsWidth;
 
             // If the width is less than the minimum width required to show a single character and ellipsis, then
             // just collapse down to the bare minimum to show only the icon.
@@ -205,8 +207,7 @@ WebInspector.HierarchicalPathComponent = class HierarchicalPathComponent extends
         this._selectorArrows = flag;
 
         if (this._selectorArrows) {
-            this._selectorArrowsElement = document.createElement("img");
-            this._selectorArrowsElement.className = "selector-arrows";
+            this._selectorArrowsElement = WI.ImageUtilities.useSVGSymbol("Images/UpDownArrows.svg", "selector-arrows");
             this._element.insertBefore(this._selectorArrowsElement, this._separatorElement);
         } else if (this._selectorArrowsElement) {
             this._selectorArrowsElement.remove();
@@ -262,17 +263,7 @@ WebInspector.HierarchicalPathComponent = class HierarchicalPathComponent extends
             sibling = sibling.nextSibling;
         }
 
-        // Since the change event only fires when the selection actually changes we are
-        // stuck with either not showing the current selection in the menu or accepting that
-        // the user can't select what is already selected again. Selecting the same item
-        // again can be desired (for selecting the main resource while looking at an image).
-        // So if there is only one option, don't make it be selected by default. This lets
-        // you select the top level item which usually has no siblings to go back.
-        // FIXME: Make this work when there are multiple options with a selectedIndex.
-        if (this._selectElement.options.length === 1)
-            this._selectElement.selectedIndex = -1;
-        else
-            this._selectElement.selectedIndex = previousSiblingCount;
+        this._selectElement.selectedIndex = previousSiblingCount;
     }
 
     _selectElementMouseOver(event)
@@ -290,25 +281,31 @@ WebInspector.HierarchicalPathComponent = class HierarchicalPathComponent extends
     _selectElementMouseDown(event)
     {
         this._updateSelectElement();
+
+        if (this._selectElement.options.length === 1) {
+            event.preventDefault();
+
+            this._selectElementSelectionChanged();
+        }
     }
 
     _selectElementMouseUp(event)
     {
-        this.dispatchEventToListeners(WebInspector.HierarchicalPathComponent.Event.Clicked, {pathComponent: this.selectedPathComponent});
+        this.dispatchEventToListeners(WI.HierarchicalPathComponent.Event.Clicked, {pathComponent: this.selectedPathComponent});
     }
 
     _selectElementSelectionChanged(event)
     {
-        this.dispatchEventToListeners(WebInspector.HierarchicalPathComponent.Event.SiblingWasSelected, {pathComponent: this.selectedPathComponent});
+        this.dispatchEventToListeners(WI.HierarchicalPathComponent.Event.SiblingWasSelected, {pathComponent: this.selectedPathComponent});
     }
 };
 
-WebInspector.HierarchicalPathComponent.MinimumWidth = 32;
-WebInspector.HierarchicalPathComponent.MinimumWidthCollapsed = 24;
-WebInspector.HierarchicalPathComponent.MinimumWidthForOneCharacterTruncatedTitle = 54;
-WebInspector.HierarchicalPathComponent.SelectorArrowsWidth = 12;
+WI.HierarchicalPathComponent.MinimumWidth = 32;
+WI.HierarchicalPathComponent.MinimumWidthCollapsed = 24;
+WI.HierarchicalPathComponent.MinimumWidthForOneCharacterTruncatedTitle = 54;
+WI.HierarchicalPathComponent.SelectorArrowsWidth = 12;
 
-WebInspector.HierarchicalPathComponent.Event = {
+WI.HierarchicalPathComponent.Event = {
     SiblingWasSelected: "hierarchical-path-component-sibling-was-selected",
     Clicked: "hierarchical-path-component-clicked"
 };

@@ -29,14 +29,15 @@
 #include "Document.h"
 #include "Element.h"
 #include "FocusController.h"
+#include "FrameLoader.h"
 #include "FrameView.h"
 #include "HistoryController.h"
 #include "HistoryItem.h"
 #include "MainFrame.h"
-#include "NoEventDispatchAssertion.h"
 #include "Node.h"
 #include "Page.h"
 #include "PageTransitionEvent.h"
+#include "ScriptDisallowedScope.h"
 #include "Settings.h"
 #include "VisitedLinkState.h"
 #include <wtf/CurrentTime.h>
@@ -47,9 +48,9 @@
 #include "FrameSelection.h"
 #endif
 
-using namespace JSC;
 
 namespace WebCore {
+using namespace JSC;
 
 DEFINE_DEBUG_ONLY_GLOBAL(WTF::RefCountedLeakCounter, cachedPageCounter, ("CachedPage"));
 
@@ -78,7 +79,7 @@ static void firePageShowAndPopStateEvents(Page& page)
     // Dispatching JavaScript events can cause frame destruction.
     auto& mainFrame = page.mainFrame();
     Vector<Ref<Frame>> childFrames;
-    for (auto* child = mainFrame.tree().traverseNextInPostOrderWithWrap(true); child; child = child->tree().traverseNextInPostOrderWithWrap(false))
+    for (auto* child = mainFrame.tree().traverseNextInPostOrder(CanWrap::Yes); child; child = child->tree().traverseNextInPostOrder(CanWrap::No))
         childFrames.append(*child);
 
     for (auto& child : childFrames) {
@@ -98,20 +99,32 @@ static void firePageShowAndPopStateEvents(Page& page)
     }
 }
 
+class CachedPageRestorationScope {
+public:
+    CachedPageRestorationScope(Page& page)
+        : m_page(page)
+    {
+        m_page.setIsRestoringCachedPage(true);
+    }
+
+    ~CachedPageRestorationScope()
+    {
+        m_page.setIsRestoringCachedPage(false);
+    }
+
+private:
+    Page& m_page;
+};
+
 void CachedPage::restore(Page& page)
 {
     ASSERT(m_cachedMainFrame);
     ASSERT(m_cachedMainFrame->view()->frame().isMainFrame());
     ASSERT(!page.subframeCount());
 
-    {
-        // Do not dispatch DOM events as their JavaScript listeners could cause the page to be put
-        // into the page cache before we have finished restoring it from the page cache.
-        NoEventDispatchAssertion noEventDispatchAssertion;
+    CachedPageRestorationScope restorationScope(page);
+    m_cachedMainFrame->open();
 
-        m_cachedMainFrame->open();
-    }
-    
     // Restore the focus appearance for the focused element.
     // FIXME: Right now we don't support pages w/ frames in the b/f cache.  This may need to be tweaked when we add support for that.
     Document* focusedDocument = page.focusController().focusedOrMainFrame().document();

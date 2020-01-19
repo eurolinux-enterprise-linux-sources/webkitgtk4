@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,12 +26,13 @@
 #include "config.h"
 #include "CommonVM.h"
 
+#include "DeprecatedGlobalSettings.h"
+#include "Frame.h"
 #include "ScriptController.h"
-#include "Settings.h"
 #include "WebCoreJSClientData.h"
-#include <heap/HeapInlines.h>
-#include "heap/MachineStackMarker.h"
-#include <runtime/VM.h>
+#include <JavaScriptCore/HeapInlines.h>
+#include <JavaScriptCore/MachineStackMarker.h>
+#include <JavaScriptCore/VM.h>
 #include <wtf/MainThread.h>
 #include <wtf/text/AtomicString.h>
 
@@ -39,9 +40,9 @@
 #include "WebCoreThreadInternal.h"
 #endif
 
-using namespace JSC;
 
 namespace WebCore {
+using namespace JSC;
 
 VM* g_commonVMOrNull;
 
@@ -53,18 +54,30 @@ VM& commonVMSlow()
     ScriptController::initializeThreading();
     g_commonVMOrNull = &VM::createLeaked(LargeHeap).leakRef();
     g_commonVMOrNull->heap.acquireAccess(); // At any time, we may do things that affect the GC.
-#if !PLATFORM(IOS)
-    g_commonVMOrNull->setExclusiveThread(std::this_thread::get_id());
-#else
-    g_commonVMOrNull->heap.setRunLoop(WebThreadRunLoop());
+#if PLATFORM(IOS)
+    g_commonVMOrNull->setRunLoop(WebThreadRunLoop());
     g_commonVMOrNull->heap.machineThreads().addCurrentThread();
 #endif
     
-    g_commonVMOrNull->setGlobalConstRedeclarationShouldThrow(Settings::globalConstRedeclarationShouldThrow());
+    g_commonVMOrNull->setGlobalConstRedeclarationShouldThrow(DeprecatedGlobalSettings::globalConstRedeclarationShouldThrow());
     
     JSVMClientData::initNormalWorld(g_commonVMOrNull);
     
     return *g_commonVMOrNull;
+}
+
+Frame* lexicalFrameFromCommonVM()
+{
+    if (auto* topCallFrame = commonVM().topCallFrame) {
+        if (auto* globalObject = JSC::jsCast<JSDOMGlobalObject*>(topCallFrame->lexicalGlobalObject())) {
+            if (auto* window = jsDynamicDowncast<JSDOMWindow*>(commonVM(), globalObject)) {
+                if (auto* frame = window->wrapped().frame())
+                    return frame;
+            }
+        }
+    }
+
+    return nullptr;
 }
 
 void addImpureProperty(const AtomicString& propertyName)

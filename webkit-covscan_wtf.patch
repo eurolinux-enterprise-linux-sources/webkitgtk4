@@ -1,0 +1,39 @@
+diff --git a/Source/WTF/wtf/CheckedArithmetic.h b/Source/WTF/wtf/CheckedArithmetic.h
+index 31be98b0929b5924bd5dfee55482af8d3807d9ca..e668bf8a8364c6959e146084e77dd64d5af26987 100644
+--- a/Source/WTF/wtf/CheckedArithmetic.h
++++ b/Source/WTF/wtf/CheckedArithmetic.h
+@@ -489,7 +489,7 @@ template <typename ResultType> struct ArithmeticOperations<unsigned, int, Result
+ 
+     static inline bool multiply(int64_t lhs, int64_t rhs, ResultType& result)
+     {
+-        return ArithmeticOperations<int, unsigned, ResultType>::multiply(rhs, lhs, result);
++        return ArithmeticOperations<int, unsigned, ResultType>::multiply(lhs, rhs, result);
+     }
+ 
+     static inline bool equals(unsigned lhs, int rhs)
+diff --git a/Source/WTF/wtf/ThreadSpecific.h b/Source/WTF/wtf/ThreadSpecific.h
+index 1be1204cddf694521e82a576b8854237d0b59ee1..fc75b241e9eb6510d8cdd7c3fd0a3c1049b87d8e 100644
+--- a/Source/WTF/wtf/ThreadSpecific.h
++++ b/Source/WTF/wtf/ThreadSpecific.h
+@@ -122,7 +122,7 @@ private:
+     void static THREAD_SPECIFIC_CALL destroy(void* ptr);
+ 
+ #if USE(PTHREADS)
+-    pthread_key_t m_key;
++    pthread_key_t m_key { };
+ #elif OS(WINDOWS)
+     int m_index;
+ #endif
+diff --git a/Source/WTF/wtf/dtoa.cpp b/Source/WTF/wtf/dtoa.cpp
+index edefd7f884305fc2c20cb3f3bc571a7f980e30f7..7b5f59290101c3abb754c55f1ea4e11a7ec23258 100644
+--- a/Source/WTF/wtf/dtoa.cpp
++++ b/Source/WTF/wtf/dtoa.cpp
+@@ -360,7 +360,7 @@ struct P5Node {
+ public:
+     P5Node() { }
+     BigInt val;
+-    P5Node* next;
++    P5Node* next { nullptr };
+ };
+ 
+ static P5Node* p5s;

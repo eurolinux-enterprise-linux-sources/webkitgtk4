@@ -31,9 +31,6 @@
 #include "Chrome.h"
 #include "HTMLDivElement.h"
 #include "MediaControlElements.h"
-#include "MouseEvent.h"
-#include "RenderTheme.h"
-#include "Text.h"
 #include <wtf/RefPtr.h>
 
 #if ENABLE(VIDEO_TRACK)
@@ -52,7 +49,7 @@ class RenderMedia;
 // An abstract class with the media control elements that all ports support.
 class MediaControls : public HTMLDivElement {
   public:
-    virtual ~MediaControls() {}
+    virtual ~MediaControls() = default;
 
     // This function is to be implemented in your port-specific media
     // controls implementation since it will return a child instance.
@@ -104,6 +101,7 @@ class MediaControls : public HTMLDivElement {
     virtual void hideTextTrackDisplay();
     virtual void updateTextTrackDisplay();
     virtual void textTrackPreferencesChanged();
+    virtual void clearTextDisplayContainer();
 #endif
 
 protected:

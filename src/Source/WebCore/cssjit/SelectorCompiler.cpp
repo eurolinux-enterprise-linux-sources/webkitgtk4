@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2018 Apple Inc. All rights reserved.
  * Copyright (C) 2014 Yusuke Suzuki <utatane.tea@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -256,7 +256,7 @@ struct BacktrackingLevel {
 class SelectorCodeGenerator {
 public:
     SelectorCodeGenerator(const CSSSelector*, SelectorContext);
-    SelectorCompilationStatus compile(JSC::VM*, JSC::MacroAssemblerCodeRef&);
+    SelectorCompilationStatus compile(JSC::MacroAssemblerCodeRef&);
 
 private:
     static const Assembler::RegisterID returnRegister;
@@ -390,21 +390,18 @@ static FunctionType constructFragments(const CSSSelector* rootSelector, Selector
 
 static void computeBacktrackingInformation(SelectorFragmentList& selectorFragments, unsigned level = 0);
 
-SelectorCompilationStatus compileSelector(const CSSSelector* lastSelector, JSC::VM* vm, SelectorContext selectorContext, JSC::MacroAssemblerCodeRef& codeRef)
+SelectorCompilationStatus compileSelector(const CSSSelector* lastSelector, SelectorContext selectorContext, JSC::MacroAssemblerCodeRef& codeRef)
 {
-    if (!vm->canUseJIT())
+    if (!JSC::VM::canUseJIT())
         return SelectorCompilationStatus::CannotCompile;
     SelectorCodeGenerator codeGenerator(lastSelector, selectorContext);
-    return codeGenerator.compile(vm, codeRef);
+    return codeGenerator.compile(codeRef);
 }
 
 static inline FragmentRelation fragmentRelationForSelectorRelation(CSSSelector::RelationType relation)
 {
     switch (relation) {
     case CSSSelector::DescendantSpace:
-#if ENABLE(CSS_SELECTORS_LEVEL4)
-    case CSSSelector::DescendantDoubleChild:
-#endif
         return FragmentRelation::Descendant;
     case CSSSelector::Child:
         return FragmentRelation::Child;
@@ -534,6 +531,9 @@ static inline FunctionType addPseudoClassType(const CSSSelector& selector, Selec
     // Unoptimized pseudo selector. They are just function call to a simple testing function.
     case CSSSelector::PseudoClassAutofill:
         fragment.unoptimizedPseudoClasses.append(JSC::FunctionPtr(isAutofilled));
+        return FunctionType::SimpleSelectorChecker;
+    case CSSSelector::PseudoClassAutofillStrongPassword:
+        fragment.unoptimizedPseudoClasses.append(JSC::FunctionPtr(isAutofilledStrongPassword));
         return FunctionType::SimpleSelectorChecker;
     case CSSSelector::PseudoClassChecked:
         fragment.unoptimizedPseudoClasses.append(JSC::FunctionPtr(isChecked));
@@ -1046,7 +1046,7 @@ static FunctionType constructFragments(const CSSSelector* rootSelector, Selector
 
 static inline bool attributeNameTestingRequiresNamespaceRegister(const CSSSelector& attributeSelector)
 {
-    return attributeSelector.attribute().prefix() != starAtom && !attributeSelector.attribute().namespaceURI().isNull();
+    return attributeSelector.attribute().prefix() != starAtom() && !attributeSelector.attribute().namespaceURI().isNull();
 }
 
 static inline bool attributeValueTestingRequiresExtraRegister(const AttributeMatchingInfo& attributeInfo)
@@ -1208,7 +1208,7 @@ void computeBacktrackingMemoryRequirements(SelectorFragmentList& selectorFragmen
     }
 }
 
-inline SelectorCompilationStatus SelectorCodeGenerator::compile(JSC::VM* vm, JSC::MacroAssemblerCodeRef& codeRef)
+inline SelectorCompilationStatus SelectorCodeGenerator::compile(JSC::MacroAssemblerCodeRef& codeRef)
 {
     switch (m_functionType) {
     case FunctionType::SimpleSelectorChecker:
@@ -1223,7 +1223,7 @@ inline SelectorCompilationStatus SelectorCodeGenerator::compile(JSC::VM* vm, JSC
         return SelectorCompilationStatus::CannotCompile;
     }
 
-    JSC::LinkBuffer linkBuffer(*vm, m_assembler, CSS_CODE_ID, JSC::JITCompilationCanFail);
+    JSC::LinkBuffer linkBuffer(m_assembler, CSS_CODE_ID, JSC::JITCompilationCanFail);
     if (!linkBuffer.isValid()) {
         // This could be SelectorCompilationStatus::NotCompiled but that would cause us to re-enter
         // the CSS JIT every time we evaluate that selector.
@@ -1238,7 +1238,7 @@ inline SelectorCompilationStatus SelectorCodeGenerator::compile(JSC::VM* vm, JSC
 #if CSS_SELECTOR_JIT_DEBUGGING
     codeRef = linkBuffer.finalizeCodeWithDisassembly("CSS Selector JIT for \"%s\"", m_originalSelector->selectorText().utf8().data());
 #else
-    codeRef = FINALIZE_CODE(linkBuffer, ("CSS Selector JIT"));
+    codeRef = FINALIZE_CODE(linkBuffer, "CSS Selector JIT");
 #endif
 
     if (m_functionType == FunctionType::SimpleSelectorChecker || m_functionType == FunctionType::CannotMatchAnything)
@@ -1386,7 +1386,7 @@ static inline TagNameEquality equalTagNames(const CSSSelector* lhs, const CSSSel
 
     const AtomicString& lhsLocalName = lhsQualifiedName.localName();
     const AtomicString& rhsLocalName = rhsQualifiedName.localName();
-    if (lhsLocalName != starAtom && rhsLocalName != starAtom) {
+    if (lhsLocalName != starAtom() && rhsLocalName != starAtom()) {
         const AtomicString& lhsLowercaseLocalName = lhs->tagLowercaseLocalName();
         const AtomicString& rhsLowercaseLocalName = rhs->tagLowercaseLocalName();
 
@@ -1400,7 +1400,7 @@ static inline TagNameEquality equalTagNames(const CSSSelector* lhs, const CSSSel
 
     const AtomicString& lhsNamespaceURI = lhsQualifiedName.namespaceURI();
     const AtomicString& rhsNamespaceURI = rhsQualifiedName.namespaceURI();
-    if (lhsNamespaceURI != starAtom && rhsNamespaceURI != starAtom) {
+    if (lhsNamespaceURI != starAtom() && rhsNamespaceURI != starAtom()) {
         if (lhsNamespaceURI != rhsNamespaceURI)
             return TagNameEquality::StrictlyNotEqual;
         return TagNameEquality::StrictlyEqual;
@@ -2800,7 +2800,7 @@ void SelectorCodeGenerator::generateElementAttributeMatching(Assembler::JumpList
         LocalRegister qualifiedNameImpl(m_registerAllocator);
         m_assembler.loadPtr(Assembler::Address(currentAttributeAddress, Attribute::nameMemoryOffset()), qualifiedNameImpl);
 
-        bool shouldCheckNamespace = attributeSelector.attribute().prefix() != starAtom;
+        bool shouldCheckNamespace = attributeSelector.attribute().prefix() != starAtom();
         if (shouldCheckNamespace) {
             Assembler::Jump nameDoesNotMatch = m_assembler.branchPtr(Assembler::NotEqual, Assembler::Address(qualifiedNameImpl, QualifiedName::QualifiedNameImpl::localNameMemoryOffset()), localNameToMatch);
 
@@ -3347,7 +3347,7 @@ void SelectorCodeGenerator::generateElementIsOnlyChild(Assembler::JumpList& fail
 
 static bool makeContextStyleUniqueIfNecessaryAndTestIsPlaceholderShown(const Element* element, SelectorChecker::CheckingContext* checkingContext)
 {
-    if (is<HTMLTextFormControlElement>(*element)) {
+    if (is<HTMLTextFormControlElement>(*element) && element->isTextField()) {
         if (checkingContext->resolvingMode == SelectorChecker::Mode::ResolvingStyle)
             checkingContext->styleRelations.append({ *element, Style::Relation::Unique, 1 });
         return downcast<HTMLTextFormControlElement>(*element).isPlaceholderVisible();
@@ -3391,7 +3391,7 @@ inline void SelectorCodeGenerator::generateElementHasTagName(Assembler::JumpList
     m_assembler.loadPtr(Assembler::Address(elementAddressRegister, Element::tagQNameMemoryOffset() + QualifiedName::implMemoryOffset()), qualifiedNameImpl);
 
     const AtomicString& selectorLocalName = nameToMatch.localName();
-    if (selectorLocalName != starAtom) {
+    if (selectorLocalName != starAtom()) {
         const AtomicString& lowercaseLocalName = tagMatchingSelector.tagLowercaseLocalName();
 
         if (selectorLocalName == lowercaseLocalName) {
@@ -3421,7 +3421,7 @@ inline void SelectorCodeGenerator::generateElementHasTagName(Assembler::JumpList
     }
 
     const AtomicString& selectorNamespaceURI = nameToMatch.namespaceURI();
-    if (selectorNamespaceURI != starAtom) {
+    if (selectorNamespaceURI != starAtom()) {
         // Generate namespaceURI == element->namespaceURI().
         LocalRegister constantRegister(m_registerAllocator);
         m_assembler.move(Assembler::TrustedImmPtr(selectorNamespaceURI.impl()), constantRegister);

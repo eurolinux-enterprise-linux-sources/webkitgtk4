@@ -50,6 +50,7 @@ enum HTTPBodyUpdatePolicy {
 };
 
 class ResourceRequest;
+class ResourceResponse;
 
 // Do not use this type directly.  Use ResourceRequest instead.
 class ResourceRequestBase {
@@ -63,6 +64,8 @@ public:
 
     WEBCORE_EXPORT const URL& url() const;
     WEBCORE_EXPORT void setURL(const URL& url);
+
+    WEBCORE_EXPORT ResourceRequest redirectedRequest(const ResourceResponse&, bool shouldClearReferrerOnHTTPSToHTTPRedirect) const;
 
     WEBCORE_EXPORT void removeCredentials();
 
@@ -89,7 +92,7 @@ public:
     void addHTTPHeaderField(const String& name, const String& value);
     void addHTTPHeaderFieldIfNotPresent(HTTPHeaderName, const String&);
 
-    bool hasHTTPHeaderField(HTTPHeaderName) const;
+    WEBCORE_EXPORT bool hasHTTPHeaderField(HTTPHeaderName) const;
 
     // Instead of passing a string literal to any of these functions, just use a HTTPHeaderName instead.
     template<size_t length> String httpHeaderField(const char (&)[length]) const = delete;
@@ -100,7 +103,7 @@ public:
 
     WEBCORE_EXPORT String httpContentType() const;
     WEBCORE_EXPORT void setHTTPContentType(const String&);
-    void clearHTTPContentType();
+    WEBCORE_EXPORT void clearHTTPContentType();
 
     bool hasHTTPHeader(HTTPHeaderName) const;
 
@@ -144,26 +147,9 @@ public:
     WEBCORE_EXPORT bool isConditional() const;
     WEBCORE_EXPORT void makeUnconditional();
 
-    // Whether the associated ResourceHandleClient needs to be notified of
-    // upload progress made for that resource.
-    bool reportUploadProgress() const { return m_reportUploadProgress; }
-    void setReportUploadProgress(bool reportUploadProgress) { m_reportUploadProgress = reportUploadProgress; }
-
-    // Whether the timing information should be collected for the request.
-    bool reportLoadTiming() const { return m_reportLoadTiming; }
-    void setReportLoadTiming(bool reportLoadTiming) { m_reportLoadTiming = reportLoadTiming; }
-
-    // Whether actual headers being sent/received should be collected and reported for the request.
-    bool reportRawHeaders() const { return m_reportRawHeaders; }
-    void setReportRawHeaders(bool reportRawHeaders) { m_reportRawHeaders = reportRawHeaders; }
-
     // Whether this request should be hidden from the Inspector.
     bool hiddenFromInspector() const { return m_hiddenFromInspector; }
     void setHiddenFromInspector(bool hiddenFromInspector) { m_hiddenFromInspector = hiddenFromInspector; }
-
-    // Whether this request should impact request counting and delay window.onload.
-    bool ignoreForRequestCount() const { return m_ignoreForRequestCount; }
-    void setIgnoreForRequestCount(bool ignoreForRequestCount) { m_ignoreForRequestCount = ignoreForRequestCount; }
 
     enum class Requester { Unspecified, Main, XHR, Fetch, Media };
     Requester requester() const { return m_requester; }
@@ -182,12 +168,7 @@ public:
     WEBCORE_EXPORT static double defaultTimeoutInterval(); // May return 0 when using platform default.
     WEBCORE_EXPORT static void setDefaultTimeoutInterval(double);
 
-#if PLATFORM(IOS)
-    WEBCORE_EXPORT static bool defaultAllowCookies();
-    WEBCORE_EXPORT static void setDefaultAllowCookies(bool);
-#endif
-
-    static bool compare(const ResourceRequest&, const ResourceRequest&);
+    WEBCORE_EXPORT static bool equal(const ResourceRequest&, const ResourceRequest&);
 
 protected:
     // Used when ResourceRequest is initialized from a platform representation of the request
@@ -202,11 +183,7 @@ protected:
         , m_timeoutInterval(s_defaultTimeoutInterval)
         , m_httpMethod(ASCIILiteral("GET"))
         , m_cachePolicy(policy)
-#if !PLATFORM(IOS)
         , m_allowCookies(true)
-#else
-        , m_allowCookies(ResourceRequestBase::defaultAllowCookies())
-#endif
         , m_resourceRequestUpdated(true)
         , m_resourceRequestBodyUpdated(true)
     {
@@ -234,11 +211,7 @@ protected:
     mutable bool m_platformRequestUpdated { false };
     mutable bool m_resourceRequestBodyUpdated { false };
     mutable bool m_platformRequestBodyUpdated { false };
-    bool m_reportUploadProgress { false };
-    bool m_reportLoadTiming { false };
-    bool m_reportRawHeaders { false };
     bool m_hiddenFromInspector { false };
-    bool m_ignoreForRequestCount { false };
     ResourceLoadPriority m_priority { ResourceLoadPriority::Low };
     Requester m_requester { Requester::Unspecified };
     String m_initiatorIdentifier;
@@ -248,14 +221,11 @@ private:
     const ResourceRequest& asResourceRequest() const;
 
     WEBCORE_EXPORT static double s_defaultTimeoutInterval;
-#if PLATFORM(IOS)
-    static bool s_defaultAllowCookies;
-#endif
 };
 
 bool equalIgnoringHeaderFields(const ResourceRequestBase&, const ResourceRequestBase&);
 
-inline bool operator==(const ResourceRequest& a, const ResourceRequest& b) { return ResourceRequestBase::compare(a, b); }
+inline bool operator==(const ResourceRequest& a, const ResourceRequest& b) { return ResourceRequestBase::equal(a, b); }
 inline bool operator!=(ResourceRequest& a, const ResourceRequest& b) { return !(a == b); }
 
 WEBCORE_EXPORT unsigned initializeMaximumHTTPConnectionCountPerHost();

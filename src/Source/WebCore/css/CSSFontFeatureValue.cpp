@@ -26,7 +26,6 @@
 #include "config.h"
 #include "CSSFontFeatureValue.h"
 
-#include "CSSParser.h"
 #include "CSSValueKeywords.h"
 #include <wtf/text/StringBuilder.h>
 
@@ -42,10 +41,10 @@ CSSFontFeatureValue::CSSFontFeatureValue(FontTag&& tag, int value)
 String CSSFontFeatureValue::customCSSText() const
 {
     StringBuilder builder;
-    builder.append('\'');
+    builder.append('"');
     for (char c : m_tag)
         builder.append(c);
-    builder.appendLiteral("' ");
+    builder.appendLiteral("\" ");
     builder.appendNumber(m_value);
     return builder.toString();
 }

@@ -36,8 +36,11 @@
 #include <OpenGLES/ES2/glext.h>
 #include <OpenGLES/ES3/gl.h>
 #else
-#if USE(OPENGL_ES_2)
+#if USE(LIBEPOXY)
+#include "EpoxyShims.h"
+#elif USE(OPENGL_ES_2)
 #include "OpenGLESShims.h"
+#define GL_GLEXT_PROTOTYPES 1
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 #elif PLATFORM(MAC)
@@ -89,9 +92,7 @@ Extensions3DOpenGLCommon::Extensions3DOpenGLCommon(GraphicsContext3D* context, b
 #endif
 }
 
-Extensions3DOpenGLCommon::~Extensions3DOpenGLCommon()
-{
-}
+Extensions3DOpenGLCommon::~Extensions3DOpenGLCommon() = default;
 
 bool Extensions3DOpenGLCommon::supports(const String& name)
 {
@@ -185,7 +186,7 @@ String Extensions3DOpenGLCommon::getTranslatedShaderSourceANGLE(Platform3DObject
 
     String translatedShaderSource;
     String shaderInfoLog;
-    int extraCompileOptions = SH_CLAMP_INDIRECT_ARRAY_BOUNDS | SH_UNFOLD_SHORT_CIRCUIT | SH_INIT_OUTPUT_VARIABLES | SH_ENFORCE_PACKING_RESTRICTIONS | SH_LIMIT_EXPRESSION_COMPLEXITY | SH_LIMIT_CALL_STACK_DEPTH;
+    uint64_t extraCompileOptions = SH_CLAMP_INDIRECT_ARRAY_BOUNDS | SH_UNFOLD_SHORT_CIRCUIT | SH_INIT_OUTPUT_VARIABLES | SH_ENFORCE_PACKING_RESTRICTIONS | SH_LIMIT_EXPRESSION_COMPLEXITY | SH_LIMIT_CALL_STACK_DEPTH | SH_INITIALIZE_UNINITIALIZED_LOCALS;
 
     if (m_requiresBuiltInFunctionEmulation)
         extraCompileOptions |= SH_EMULATE_ABS_INT_FUNCTION;

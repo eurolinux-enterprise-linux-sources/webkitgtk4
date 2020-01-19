@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,9 +25,13 @@
 
 #pragma once
 
-#include "EventHandler.h"
 #include "Frame.h"
+#include <wtf/Optional.h>
 #include <wtf/Vector.h>
+
+#if ENABLE(APPLICATION_MANIFEST)
+#include "ApplicationManifest.h"
+#endif
 
 namespace WebCore {
 
@@ -65,12 +69,16 @@ public:
 
 #if ENABLE(APPLE_PAY)
     PaymentCoordinator& paymentCoordinator() const { return *m_paymentCoordinator; }
+    WEBCORE_EXPORT void setPaymentCoordinator(std::unique_ptr<PaymentCoordinator>&&);
+#endif
+
+#if ENABLE(APPLICATION_MANIFEST)
+    const std::optional<ApplicationManifest>& applicationManifest() const { return m_applicationManifest; }
 #endif
 
     PerformanceLogging& performanceLogging() const { return *m_performanceLogging; }
 
     void didCompleteLoad();
-    MonotonicTime timeOfLastCompletedLoad() const { return m_timeOfLastCompletedLoad; }
 
 private:
     MainFrame(Page&, PageConfiguration&);
@@ -93,9 +101,14 @@ private:
     std::unique_ptr<PaymentCoordinator> m_paymentCoordinator;
 #endif
 
+#if ENABLE(APPLICATION_MANIFEST)
+    std::optional<ApplicationManifest> m_applicationManifest;
+#endif
+
     std::unique_ptr<PerformanceLogging> m_performanceLogging;
 
-    MonotonicTime m_timeOfLastCompletedLoad;
+    unsigned m_navigationDisableCount { 0 };
+    friend class NavigationDisabler;
 };
 
 } // namespace WebCore

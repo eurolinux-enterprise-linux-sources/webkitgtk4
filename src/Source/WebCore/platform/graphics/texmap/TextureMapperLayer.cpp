@@ -171,6 +171,14 @@ void TextureMapperLayer::paintSelfAndChildren(const TextureMapperPaintOptions& o
         clipTransform.multiply(options.transform);
         clipTransform.multiply(m_currentTransform.combined());
         options.textureMapper.beginClip(clipTransform, layerRect());
+
+        // If as a result of beginClip(), the clipping area is empty, it means that the intersection of the previous
+        // clipping area and the current one don't have any pixels in common. In this case we can skip painting the
+        // children as they will be clipped out (see https://bugs.webkit.org/show_bug.cgi?id=181080).
+        if (options.textureMapper.clipBounds().isEmpty()) {
+            options.textureMapper.endClip();
+            return;
+        }
     }
 
     for (auto* child : m_children)
@@ -365,7 +373,7 @@ void TextureMapperLayer::applyMask(const TextureMapperPaintOptions& options)
     options.textureMapper.setMaskMode(false);
 }
 
-PassRefPtr<BitmapTexture> TextureMapperLayer::paintIntoSurface(const TextureMapperPaintOptions& options, const IntSize& size)
+RefPtr<BitmapTexture> TextureMapperLayer::paintIntoSurface(const TextureMapperPaintOptions& options, const IntSize& size)
 {
     RefPtr<BitmapTexture> surface = options.textureMapper.acquireTextureFromPool(size, BitmapTexture::SupportsAlpha | BitmapTexture::FBOAttachment);
     TextureMapperPaintOptions paintOptions(options);
@@ -376,16 +384,16 @@ PassRefPtr<BitmapTexture> TextureMapperLayer::paintIntoSurface(const TextureMapp
         m_state.maskLayer->applyMask(options);
     surface = surface->applyFilters(options.textureMapper, m_currentFilters);
     options.textureMapper.bindSurface(surface.get());
-    return surface.release();
+    return surface;
 }
 
-static void commitSurface(const TextureMapperPaintOptions& options, PassRefPtr<BitmapTexture> surface, const IntRect& rect, float opacity)
+static void commitSurface(const TextureMapperPaintOptions& options, BitmapTexture& surface, const IntRect& rect, float opacity)
 {
     options.textureMapper.bindSurface(options.surface.get());
     TransformationMatrix targetTransform;
     targetTransform.translate(options.offset.width(), options.offset.height());
     targetTransform.multiply(options.transform);
-    options.textureMapper.drawTexture(*surface.get(), rect, targetTransform, opacity);
+    options.textureMapper.drawTexture(surface, rect, targetTransform, opacity);
 }
 
 void TextureMapperLayer::paintWithIntermediateSurface(const TextureMapperPaintOptions& options, const IntRect& rect)
@@ -405,7 +413,7 @@ void TextureMapperLayer::paintWithIntermediateSurface(const TextureMapperPaintOp
     }
 
     if (replicaSurface && options.opacity == 1) {
-        commitSurface(options, replicaSurface, rect, 1);
+        commitSurface(options, *replicaSurface, rect, 1);
         replicaSurface = nullptr;
     }
 
@@ -416,7 +424,7 @@ void TextureMapperLayer::paintWithIntermediateSurface(const TextureMapperPaintOp
         mainSurface = replicaSurface;
     }
 
-    commitSurface(options, mainSurface, rect, options.opacity);
+    commitSurface(options, *mainSurface, rect, options.opacity);
 }
 
 void TextureMapperLayer::paintRecursive(const TextureMapperPaintOptions& options)
@@ -441,13 +449,6 @@ TextureMapperLayer::~TextureMapperLayer()
         child->m_parent = nullptr;
 
     removeFromParent();
-
-    if (m_effectTarget) {
-        if (m_effectTarget->m_state.maskLayer == this)
-            m_effectTarget->m_state.maskLayer = nullptr;
-        if (m_effectTarget->m_state.replicaLayer == this)
-            m_effectTarget->m_state.replicaLayer = nullptr;
-    }
 }
 
 #if !USE(COORDINATED_GRAPHICS)
@@ -497,16 +498,20 @@ void TextureMapperLayer::removeAllChildren()
 
 void TextureMapperLayer::setMaskLayer(TextureMapperLayer* maskLayer)
 {
-    if (maskLayer)
-        maskLayer->m_effectTarget = this;
-    m_state.maskLayer = maskLayer;
+    if (maskLayer) {
+        maskLayer->m_effectTarget = createWeakPtr();
+        m_state.maskLayer = maskLayer->createWeakPtr();
+    } else
+        m_state.maskLayer = nullptr;
 }
 
 void TextureMapperLayer::setReplicaLayer(TextureMapperLayer* replicaLayer)
 {
-    if (replicaLayer)
-        replicaLayer->m_effectTarget = this;
-    m_state.replicaLayer = replicaLayer;
+    if (replicaLayer) {
+        replicaLayer->m_effectTarget = createWeakPtr();
+        m_state.replicaLayer = replicaLayer->createWeakPtr();
+    } else
+        m_state.replicaLayer = nullptr;
 }
 
 void TextureMapperLayer::setPosition(const FloatPoint& position)
@@ -637,9 +642,9 @@ void TextureMapperLayer::setFixedToViewport(bool fixedToViewport)
     m_fixedToViewport = fixedToViewport;
 }
 
-void TextureMapperLayer::setBackingStore(PassRefPtr<TextureMapperBackingStore> backingStore)
+void TextureMapperLayer::setBackingStore(RefPtr<TextureMapperBackingStore>&& backingStore)
 {
-    m_backingStore = backingStore;
+    m_backingStore = WTFMove(backingStore);
 }
 
 bool TextureMapperLayer::descendantsOrSelfHaveRunningAnimations() const

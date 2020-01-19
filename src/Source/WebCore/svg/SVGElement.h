@@ -99,7 +99,7 @@ public:
     bool getBoundingBox(FloatRect&, SVGLocatable::StyleUpdateStrategy = SVGLocatable::AllowStyleUpdate);
 
     SVGElement* correspondingElement() const;
-    SVGUseElement* correspondingUseElement() const;
+    RefPtr<SVGUseElement> correspondingUseElement() const;
 
     void setCorrespondingElement(SVGElement*);
 
@@ -131,10 +131,6 @@ public:
     bool removeEventListener(const AtomicString& eventType, EventListener&, const ListenerOptions&) override;
     bool hasFocusEventListeners() const;
 
-#if ENABLE(CSS_REGIONS)
-    bool shouldMoveToFlowThread(const RenderStyle&) const override;
-#endif
-
     bool hasTagName(const SVGQualifiedName& name) const { return hasLocalName(name.localName()); }
     int tabIndex() const override;
 
@@ -163,8 +159,8 @@ protected:
 
     bool isPresentationAttribute(const QualifiedName&) const override;
     void collectStyleForPresentationAttribute(const QualifiedName&, const AtomicString&, MutableStyleProperties&) override;
-    InsertionNotificationRequest insertedInto(ContainerNode&) override;
-    void removedFrom(ContainerNode&) override;
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) override;
+    void removedFromAncestor(RemovalType, ContainerNode&) override;
     void childrenChanged(const ChildChange&) override;
     virtual bool selfHasRelativeLengths() const { return false; }
     void updateRelativeLengthsInformation() { updateRelativeLengthsInformation(selfHasRelativeLengths(), this); }
@@ -218,7 +214,7 @@ struct SVGAttributeHashTranslator {
     static unsigned hash(const QualifiedName& key)
     {
         if (key.hasPrefix()) {
-            QualifiedNameComponents components = { nullAtom.impl(), key.localName().impl(), key.namespaceURI().impl() };
+            QualifiedNameComponents components = { nullAtom().impl(), key.localName().impl(), key.namespaceURI().impl() };
             return hashComponents(components);
         }
         return DefaultHash<QualifiedName>::Hash::hash(key);

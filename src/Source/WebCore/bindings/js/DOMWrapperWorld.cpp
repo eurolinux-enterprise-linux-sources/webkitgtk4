@@ -27,9 +27,9 @@
 #include "WebCoreJSClientData.h"
 #include <wtf/MainThread.h>
 
-using namespace JSC;
 
 namespace WebCore {
+using namespace JSC;
 
 DOMWrapperWorld::DOMWrapperWorld(JSC::VM& vm, bool isNormal)
     : m_vm(vm)
@@ -47,8 +47,8 @@ DOMWrapperWorld::~DOMWrapperWorld()
     static_cast<JSVMClientData*>(clientData)->forgetWorld(*this);
 
     // These items are created lazily.
-    while (!m_scriptControllersWithWindowShells.isEmpty())
-        (*m_scriptControllersWithWindowShells.begin())->destroyWindowShell(*this);
+    while (!m_scriptControllersWithWindowProxies.isEmpty())
+        (*m_scriptControllersWithWindowProxies.begin())->destroyWindowProxy(*this);
 }
 
 void DOMWrapperWorld::clearWrappers()
@@ -56,8 +56,8 @@ void DOMWrapperWorld::clearWrappers()
     m_wrappers.clear();
 
     // These items are created lazily.
-    while (!m_scriptControllersWithWindowShells.isEmpty())
-        (*m_scriptControllersWithWindowShells.begin())->destroyWindowShell(*this);
+    while (!m_scriptControllersWithWindowProxies.isEmpty())
+        (*m_scriptControllersWithWindowProxies.begin())->destroyWindowProxy(*this);
 }
 
 DOMWrapperWorld& normalWorld(JSC::VM& vm)

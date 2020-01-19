@@ -49,9 +49,7 @@ AudioSession::AudioSession()
     notImplemented();
 }
 
-AudioSession::~AudioSession()
-{
-}
+AudioSession::~AudioSession() = default;
 
 void AudioSession::setCategory(CategoryType)
 {
@@ -76,6 +74,12 @@ AudioSession::CategoryType AudioSession::category() const
 }
 
 float AudioSession::sampleRate() const
+{
+    notImplemented();
+    return 0;
+}
+
+size_t AudioSession::bufferSize() const
 {
     notImplemented();
     return 0;

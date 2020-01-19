@@ -30,43 +30,40 @@
 #include "ViewportArguments.h"
 #include <wtf/Noncopyable.h>
 
+namespace WTF {
+class TextStream;
+}
+
 namespace WebCore {
 
 static const double forceAlwaysUserScalableMaximumScale = 5.0;
 static const double forceAlwaysUserScalableMinimumScale = 1.0;
-
-class TextStream;
 
 class ViewportConfiguration {
     WTF_MAKE_NONCOPYABLE(ViewportConfiguration); WTF_MAKE_FAST_ALLOCATED;
 public:
     // FIXME: unify with ViewportArguments.
     struct Parameters {
-        Parameters()
-            : width(0)
-            , height(0)
-            , initialScale(0)
-            , minimumScale(0)
-            , maximumScale(0)
-            , allowsUserScaling(false)
-            , allowsShrinkToFit(false)
-            , widthIsSet(false)
-            , heightIsSet(false)
-            , initialScaleIsSet(false)
+        double width { 0 };
+        double height { 0 };
+        double initialScale { 0 };
+        double minimumScale { 0 };
+        double maximumScale { 0 };
+        bool allowsUserScaling { false };
+        bool allowsShrinkToFit { false };
+        bool avoidsUnsafeArea { true };
+
+        bool widthIsSet { false };
+        bool heightIsSet { false };
+        bool initialScaleIsSet { false };
+
+        bool operator==(const Parameters& other) const
         {
+            return width == other.width && height == other.height
+                && initialScale == other.initialScale && minimumScale == other.minimumScale && maximumScale == other.maximumScale
+                && allowsUserScaling == other.allowsUserScaling && allowsShrinkToFit == other.allowsShrinkToFit && avoidsUnsafeArea == other.avoidsUnsafeArea
+                && widthIsSet == other.widthIsSet && heightIsSet == other.heightIsSet && initialScaleIsSet == other.initialScaleIsSet;
         }
-
-        double width;
-        double height;
-        double initialScale;
-        double minimumScale;
-        double maximumScale;
-        bool allowsUserScaling;
-        bool allowsShrinkToFit;
-
-        bool widthIsSet;
-        bool heightIsSet;
-        bool initialScaleIsSet;
     };
 
     WEBCORE_EXPORT ViewportConfiguration();
@@ -95,6 +92,7 @@ public:
     WEBCORE_EXPORT bool allowsUserScaling() const;
     WEBCORE_EXPORT bool allowsUserScalingIgnoringAlwaysScalable() const;
     bool allowsShrinkToFit() const;
+    bool avoidsUnsafeArea() const { return m_configuration.avoidsUnsafeArea; }
 
     WEBCORE_EXPORT static Parameters webpageParameters();
     WEBCORE_EXPORT static Parameters textDocumentParameters();
@@ -103,7 +101,7 @@ public:
     WEBCORE_EXPORT static Parameters testingParameters();
     
 #ifndef NDEBUG
-    WTF::CString description() const;
+    String description() const;
     WEBCORE_EXPORT void dump() const;
 #endif
 
@@ -128,6 +126,7 @@ private:
     bool m_forceAlwaysUserScalable;
 };
 
-TextStream& operator<<(TextStream&, const ViewportConfiguration::Parameters&);
+WTF::TextStream& operator<<(WTF::TextStream&, const ViewportConfiguration::Parameters&);
+WTF::TextStream& operator<<(WTF::TextStream&, const ViewportConfiguration&);
 
 } // namespace WebCore

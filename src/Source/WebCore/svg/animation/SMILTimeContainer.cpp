@@ -28,13 +28,17 @@
 
 #include "Document.h"
 #include "ElementIterator.h"
+#include "Page.h"
 #include "SVGSMILElement.h"
 #include "SVGSVGElement.h"
 #include <wtf/CurrentTime.h>
 
 namespace WebCore {
 
-SMILTimeContainer::SMILTimeContainer(SVGSVGElement* owner) 
+static const Seconds SMILAnimationFrameDelay { 1_s / 60. };
+static const Seconds SMILAnimationFrameThrottledDelay { 1_s / 30. };
+
+SMILTimeContainer::SMILTimeContainer(SVGSVGElement& owner)
     : m_beginTime(0)
     , m_pauseTime(0)
     , m_accumulatedActiveTime(0)
@@ -98,6 +102,14 @@ void SMILTimeContainer::notifyIntervalsChanged()
     // Schedule updateAnimations() to be called asynchronously so multiple intervals
     // can change with updateAnimations() only called once at the end.
     startTimer(elapsed(), 0);
+}
+
+Seconds SMILTimeContainer::animationFrameDelay() const
+{
+    auto* page = m_ownerSVGElement.document().page();
+    if (!page)
+        return SMILAnimationFrameDelay;
+    return page->isLowPowerModeEnabled() ? SMILAnimationFrameThrottledDelay : SMILAnimationFrameDelay;
 }
 
 SMILTime SMILTimeContainer::elapsed() const
@@ -204,7 +216,7 @@ void SMILTimeContainer::startTimer(SMILTime elapsed, SMILTime fireTime, SMILTime
         return;
 
     SMILTime delay = std::max(fireTime - elapsed, minimumDelay);
-    m_timer.startOneShot(delay.value());
+    m_timer.startOneShot(1_s * delay.value());
 }
 
 void SMILTimeContainer::timerFired()
@@ -218,7 +230,7 @@ void SMILTimeContainer::updateDocumentOrderIndexes()
 {
     unsigned timingElementCount = 0;
 
-    for (auto& smilElement : descendantsOfType<SVGSMILElement>(*m_ownerSVGElement))
+    for (auto& smilElement : descendantsOfType<SVGSMILElement>(m_ownerSVGElement))
         smilElement.setDocumentOrderIndex(timingElementCount++);
 
     m_documentOrderIndexesDirty = false;
@@ -276,7 +288,7 @@ void SMILTimeContainer::updateAnimations(SMILTime elapsed, bool seekToTime)
         // have higher priority.
         sortByPriority(*scheduled, elapsed);
 
-        SVGSMILElement* resultElement = nullptr;
+        RefPtr<SVGSMILElement> resultElement;
         for (auto& animation : *scheduled) {
             ASSERT(animation->timeContainer() == this);
             ASSERT(animation->targetElement());
@@ -290,7 +302,7 @@ void SMILTimeContainer::updateAnimations(SMILTime elapsed, bool seekToTime)
             }
 
             // This will calculate the contribution from the animation and add it to the resultsElement.
-            if (!animation->progress(elapsed, resultElement, seekToTime) && resultElement == animation)
+            if (!animation->progress(elapsed, resultElement.get(), seekToTime) && resultElement == animation)
                 resultElement = nullptr;
 
             SMILTime nextFireTime = animation->nextProgressTime();
@@ -299,14 +311,14 @@ void SMILTimeContainer::updateAnimations(SMILTime elapsed, bool seekToTime)
         }
 
         if (resultElement)
-            animationsToApply.append(resultElement);
+            animationsToApply.append(resultElement.get());
     }
 
     if (animationsToApply.isEmpty()) {
 #ifndef NDEBUG
         m_preventScheduledAnimationsChanges = false;
 #endif
-        startTimer(elapsed, earliestFireTime, SMILAnimationFrameDelay);
+        startTimer(elapsed, earliestFireTime, animationFrameDelay());
         return;
     }
 
@@ -318,7 +330,7 @@ void SMILTimeContainer::updateAnimations(SMILTime elapsed, bool seekToTime)
     m_preventScheduledAnimationsChanges = false;
 #endif
 
-    startTimer(elapsed, earliestFireTime, SMILAnimationFrameDelay);
+    startTimer(elapsed, earliestFireTime, animationFrameDelay());
 }
 
 }

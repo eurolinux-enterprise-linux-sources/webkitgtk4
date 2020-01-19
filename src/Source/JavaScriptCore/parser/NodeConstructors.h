@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2009, 2013, 2015-2016 Apple Inc. All rights reserved.
+ *  Copyright (C) 2009-2018 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -21,9 +21,7 @@
 #pragma once
 
 #include "Nodes.h"
-#include "Lexer.h"
 #include "Opcode.h"
-#include "Parser.h"
 
 namespace JSC {
 
@@ -32,9 +30,10 @@ namespace JSC {
         return parserArena.allocateFreeable(size);
     }
 
+    template<typename T>
     inline void* ParserArenaDeletable::operator new(size_t size, ParserArena& parserArena)
     {
-        return parserArena.allocateDeletable(size);
+        return parserArena.allocateDeletable<T>(size);
     }
 
     inline ParserArenaRoot::ParserArenaRoot(ParserArena& parserArena)
@@ -91,6 +90,13 @@ namespace JSC {
 
     inline IntegerNode::IntegerNode(const JSTokenLocation& location, double value)
         : DoubleNode(location, value)
+    {
+    }
+
+    inline BigIntNode::BigIntNode(const JSTokenLocation& location, const Identifier& value, uint8_t radix)
+        : ConstantNode(location, ResultType::bigIntType())
+        , m_value(value)
+        , m_radix(radix)
     {
     }
 
@@ -173,8 +179,19 @@ namespace JSC {
     {
     }
 
-    inline NewTargetNode::NewTargetNode(const JSTokenLocation& location)
+    inline MetaPropertyNode::MetaPropertyNode(const JSTokenLocation& location)
         : ExpressionNode(location)
+    {
+    }
+
+    inline NewTargetNode::NewTargetNode(const JSTokenLocation& location)
+        : MetaPropertyNode(location)
+    {
+    }
+
+    inline ImportMetaNode::ImportMetaNode(const JSTokenLocation& location, ExpressionNode* expr)
+        : MetaPropertyNode(location)
+        , m_expr(expr)
     {
     }
 
@@ -232,17 +249,30 @@ namespace JSC {
         , m_needsSuperBinding(superBinding == SuperBinding::Needed)
         , m_putType(putType)
         , m_isClassProperty(isClassProperty)
+        , m_isOverriddenByDuplicate(false)
+    {
+    }
+    
+    inline PropertyNode::PropertyNode(ExpressionNode* assign, Type type, PutType putType, SuperBinding superBinding, bool isClassProperty)
+        : m_name(nullptr)
+        , m_assign(assign)
+        , m_type(type)
+        , m_needsSuperBinding(superBinding == SuperBinding::Needed)
+        , m_putType(putType)
+        , m_isClassProperty(isClassProperty)
+        , m_isOverriddenByDuplicate(false)
     {
     }
 
     inline PropertyNode::PropertyNode(ExpressionNode* name, ExpressionNode* assign, Type type, PutType putType, SuperBinding superBinding, bool isClassProperty)
-        : m_name(0)
+        : m_name(nullptr)
         , m_expression(name)
         , m_assign(assign)
         , m_type(type)
         , m_needsSuperBinding(superBinding == SuperBinding::Needed)
         , m_putType(putType)
         , m_isClassProperty(isClassProperty)
+        , m_isOverriddenByDuplicate(false)
     {
     }
 
@@ -290,6 +320,12 @@ namespace JSC {
     
     
     inline SpreadExpressionNode::SpreadExpressionNode(const JSTokenLocation& location, ExpressionNode* expression)
+        : ExpressionNode(location)
+        , m_expression(expression)
+    {
+    }
+    
+    inline ObjectSpreadExpressionNode::ObjectSpreadExpressionNode(const JSTokenLocation& location, ExpressionNode* expression)
         : ExpressionNode(location)
         , m_expression(expression)
     {
@@ -387,13 +423,15 @@ namespace JSC {
     {
     }
 
-    inline CallFunctionCallDotNode::CallFunctionCallDotNode(const JSTokenLocation& location, ExpressionNode* base, const Identifier& ident, ArgumentsNode* args, const JSTextPosition& divot, const JSTextPosition& divotStart, const JSTextPosition& divotEnd)
+    inline CallFunctionCallDotNode::CallFunctionCallDotNode(const JSTokenLocation& location, ExpressionNode* base, const Identifier& ident, ArgumentsNode* args, const JSTextPosition& divot, const JSTextPosition& divotStart, const JSTextPosition& divotEnd, size_t distanceToInnermostCallOrApply)
         : FunctionCallDotNode(location, base, ident, args, divot, divotStart, divotEnd)
+        , m_distanceToInnermostCallOrApply(distanceToInnermostCallOrApply)
     {
     }
 
-    inline ApplyFunctionCallDotNode::ApplyFunctionCallDotNode(const JSTokenLocation& location, ExpressionNode* base, const Identifier& ident, ArgumentsNode* args, const JSTextPosition& divot, const JSTextPosition& divotStart, const JSTextPosition& divotEnd)
+    inline ApplyFunctionCallDotNode::ApplyFunctionCallDotNode(const JSTokenLocation& location, ExpressionNode* base, const Identifier& ident, ArgumentsNode* args, const JSTextPosition& divot, const JSTextPosition& divotStart, const JSTextPosition& divotEnd, size_t distanceToInnermostCallOrApply)
         : FunctionCallDotNode(location, base, ident, args, divot, divotStart, divotEnd)
+        , m_distanceToInnermostCallOrApply(distanceToInnermostCallOrApply)
     {
     }
 
@@ -1024,8 +1062,9 @@ namespace JSC {
     {
     }
     
-    inline ForOfNode::ForOfNode(const JSTokenLocation& location, ExpressionNode* lexpr, ExpressionNode* expr, StatementNode* statement, VariableEnvironment& lexicalVariables)
+    inline ForOfNode::ForOfNode(bool isForAwait, const JSTokenLocation& location, ExpressionNode* lexpr, ExpressionNode* expr, StatementNode* statement, VariableEnvironment& lexicalVariables)
         : EnumerationNode(location, lexpr, expr, statement, lexicalVariables)
+        , m_isForAwait(isForAwait)
     {
     }
     

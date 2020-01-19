@@ -39,7 +39,6 @@ namespace WebCore {
 
 // FIXME: These values are straight out of DragControllerMac, so probably have
 // little correlation with Gdk standards...
-const int DragController::LinkDragBorderInset = 2;
 const int DragController::MaxOriginalImageArea = 1500 * 1500;
 const int DragController::DragIconRightInset = 7;
 const int DragController::DragIconBottomInset = 3;
@@ -76,11 +75,5 @@ void DragController::declareAndWriteDragImage(DataTransfer& dataTransfer, Elemen
     ASSERT(frame);
     frame->editor().writeImageToPasteboard(dataTransfer.pasteboard(), element, url, label);
 }
-
-#if ENABLE(ATTACHMENT_ELEMENT)
-void DragController::declareAndWriteAttachment(DataTransfer&, Element&, const URL&)
-{
-}
-#endif
 
 }

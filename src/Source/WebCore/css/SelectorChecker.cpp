@@ -44,7 +44,6 @@
 #include "RenderElement.h"
 #include "SelectorCheckerTestFunctions.h"
 #include "ShadowRoot.h"
-#include "StyledElement.h"
 #include "Text.h"
 
 namespace WebCore {
@@ -333,9 +332,6 @@ SelectorChecker::MatchResult SelectorChecker::matchRecursively(CheckingContext& 
 
     switch (relation) {
     case CSSSelector::DescendantSpace:
-#if ENABLE(CSS_SELECTORS_LEVEL4)
-    case CSSSelector::DescendantDoubleChild:
-#endif
         nextContext = localContextForParent(nextContext);
         nextContext.firstSelectorOfTheFragment = nextContext.selector;
         for (; nextContext.element; nextContext = localContextForParent(nextContext)) {
@@ -644,10 +640,10 @@ static inline bool tagMatches(const Element& element, const CSSSelector& simpleS
 
     const AtomicString& localName = (element.isHTMLElement() && element.document().isHTMLDocument()) ? simpleSelector.tagLowercaseLocalName() : tagQName.localName();
 
-    if (localName != starAtom && localName != element.localName())
+    if (localName != starAtom() && localName != element.localName())
         return false;
     const AtomicString& namespaceURI = tagQName.namespaceURI();
-    return namespaceURI == starAtom || namespaceURI == element.namespaceURI();
+    return namespaceURI == starAtom() || namespaceURI == element.namespaceURI();
 }
 
 bool SelectorChecker::checkOne(CheckingContext& checkingContext, const LocalContext& context, PseudoIdSet& dynamicPseudoIdSet, MatchType& matchType, unsigned& specificity) const
@@ -946,6 +942,8 @@ bool SelectorChecker::checkOne(CheckingContext& checkingContext, const LocalCont
             break;
         case CSSSelector::PseudoClassAutofill:
             return isAutofilled(element);
+        case CSSSelector::PseudoClassAutofillStrongPassword:
+            return isAutofilledStrongPassword(element);
         case CSSSelector::PseudoClassAnyLink:
         case CSSSelector::PseudoClassAnyLinkDeprecated:
         case CSSSelector::PseudoClassLink:

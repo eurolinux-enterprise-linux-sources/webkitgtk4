@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2011 Google, Inc. All rights reserved.
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -45,11 +45,6 @@ static bool isDirectiveValueCharacter(UChar c)
     return isASCIISpace(c) || (c >= 0x21 && c <= 0x7e); // Whitespace + VCHAR
 }
 
-static bool isNotASCIISpace(UChar c)
-{
-    return !isASCIISpace(c);
-}
-
 static inline bool checkEval(ContentSecurityPolicySourceListDirective* directive)
 {
     return !directive || directive->allowEval();
@@ -81,7 +76,8 @@ static inline bool checkFrameAncestors(ContentSecurityPolicySourceListDirective*
         return true;
     bool didReceiveRedirectResponse = false;
     for (Frame* current = frame.tree().parent(); current; current = current->tree().parent()) {
-        if (!directive->allows(current->document()->url(), didReceiveRedirectResponse, ContentSecurityPolicySourceListDirective::ShouldAllowEmptyURLIfSourceListIsNotNone::No))
+        URL origin { URL { }, current->document()->securityOrigin().toString() };
+        if (!origin.isValid() || !directive->allows(origin, didReceiveRedirectResponse, ContentSecurityPolicySourceListDirective::ShouldAllowEmptyURLIfSourceListIsNotNone::No))
             return false;
     }
     return true;
@@ -109,8 +105,10 @@ std::unique_ptr<ContentSecurityPolicyDirectiveList> ContentSecurityPolicyDirecti
     directives->parse(header, from);
 
     if (!checkEval(directives->operativeDirective(directives->m_scriptSrc.get()))) {
-        String message = makeString("Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: \"", directives->operativeDirective(directives->m_scriptSrc.get())->text(), "\".\n");
-        directives->setEvalDisabledErrorMessage(message);
+        String evalDisabledMessage = makeString("Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: \"", directives->operativeDirective(directives->m_scriptSrc.get())->text(), "\".\n");
+        directives->setEvalDisabledErrorMessage(evalDisabledMessage);
+        String webAssemblyDisabledMessage = makeString("Refused to create a WebAssembly object because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: \"", directives->operativeDirective(directives->m_scriptSrc.get())->text(), "\".\n");
+        directives->setWebAssemblyDisabledErrorMessage(webAssemblyDisabledMessage);
     }
 
     if (directives->isReportOnly() && directives->reportURIs().isEmpty())
@@ -245,6 +243,16 @@ const ContentSecurityPolicyDirective* ContentSecurityPolicyDirectiveList::violat
         return nullptr;
     return operativeDirective;
 }
+
+#if ENABLE(APPLICATION_MANIFEST)
+const ContentSecurityPolicyDirective* ContentSecurityPolicyDirectiveList::violatedDirectiveForManifest(const URL& url, bool didReceiveRedirectResponse) const
+{
+    ContentSecurityPolicySourceListDirective* operativeDirective = this->operativeDirective(m_manifestSrc.get());
+    if (checkSource(operativeDirective, url, didReceiveRedirectResponse))
+        return nullptr;
+    return operativeDirective;
+}
+#endif // ENABLE(APPLICATION_MANIFEST)
 
 const ContentSecurityPolicyDirective* ContentSecurityPolicyDirectiveList::violatedDirectiveForMedia(const URL& url, bool didReceiveRedirectResponse) const
 {
@@ -478,6 +486,10 @@ void ContentSecurityPolicyDirectiveList::addDirective(const String& name, const 
         setCSPDirective<ContentSecurityPolicySourceListDirective>(name, value, m_imgSrc);
     else if (equalIgnoringASCIICase(name, ContentSecurityPolicyDirectiveNames::fontSrc))
         setCSPDirective<ContentSecurityPolicySourceListDirective>(name, value, m_fontSrc);
+#if ENABLE(APPLICATION_MANIFEST)
+    else if (equalIgnoringASCIICase(name, ContentSecurityPolicyDirectiveNames::manifestSrc))
+        setCSPDirective<ContentSecurityPolicySourceListDirective>(name, value, m_manifestSrc);
+#endif
     else if (equalIgnoringASCIICase(name, ContentSecurityPolicyDirectiveNames::mediaSrc))
         setCSPDirective<ContentSecurityPolicySourceListDirective>(name, value, m_mediaSrc);
     else if (equalIgnoringASCIICase(name, ContentSecurityPolicyDirectiveNames::connectSrc))

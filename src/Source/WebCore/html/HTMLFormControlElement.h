@@ -33,7 +33,7 @@
 
 namespace WebCore {
 
-class FormDataList;
+class DOMFormData;
 class HTMLFieldSetElement;
 class HTMLFormElement;
 class HTMLLegendElement;
@@ -72,7 +72,6 @@ public:
 
     bool isDisabledFormControl() const override;
 
-    bool isFocusable() const override;
     bool isEnumeratable() const override { return false; }
 
     bool isRequired() const;
@@ -85,7 +84,7 @@ public:
 
     // Override in derived classes to get the encoded name=value pair for submitting.
     // Return true for a successful control (see HTML4-17.13.2).
-    bool appendFormData(FormDataList&, bool) override { return false; }
+    bool appendFormData(DOMFormData&, bool) override { return false; }
 
     virtual bool isSuccessfulSubmitButton() const { return false; }
     virtual bool isActivatedSubmit() const { return false; }
@@ -102,6 +101,7 @@ public:
     WEBCORE_EXPORT bool checkValidity(Vector<RefPtr<HTMLFormControlElement>>* unhandledInvalidControls = nullptr);
     bool reportValidity();
     void focusAndShowValidationMessage();
+    bool isShowingValidationMessage() const;
     // This must be called when a validation constraint or control value is changed.
     void updateValidity();
     void setCustomValidity(const String&) override;
@@ -135,10 +135,10 @@ protected:
     virtual void readOnlyAttributeChanged();
     virtual void requiredAttributeChanged();
     void didAttachRenderers() override;
-    InsertionNotificationRequest insertedInto(ContainerNode&) override;
-    void finishedInsertingSubtree() override;
-    void removedFrom(ContainerNode&) override;
-    void didMoveToNewDocument(Document& oldDocument) override;
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) override;
+    void didFinishInsertingNode() override;
+    void removedFromAncestor(RemovalType, ContainerNode&) override;
+    void didMoveToNewDocument(Document& oldDocument, Document& newDocument) override;
 
     bool supportsFocus() const override;
     bool isKeyboardFocusable(KeyboardEvent&) const override;
@@ -165,7 +165,6 @@ private:
     bool matchesInvalidPseudoClass() const override;
 
     bool isFormControlElement() const final { return true; }
-    bool alwaysCreateUserAgentShadowRoot() const override { return true; }
 
     int tabIndex() const final;
 

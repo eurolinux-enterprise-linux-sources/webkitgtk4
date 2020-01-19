@@ -33,7 +33,6 @@
 #include "ChromeClient.h"
 #include "Document.h"
 #include "EventNames.h"
-#include "ExceptionCode.h"
 #include "Frame.h"
 #include "HTMLImageLoader.h"
 #include "HTMLNames.h"
@@ -44,11 +43,10 @@
 #include "RenderVideo.h"
 #include "ScriptController.h"
 #include "Settings.h"
-#include "TextStream.h"
-#include <wtf/NeverDestroyed.h>
+#include <wtf/text/TextStream.h>
 
 #if ENABLE(VIDEO_PRESENTATION_MODE)
-#include "WebVideoFullscreenInterface.h"
+#include "VideoFullscreenModel.h"
 #endif
 
 namespace WebCore {
@@ -66,6 +64,7 @@ inline HTMLVideoElement::HTMLVideoElement(const QualifiedName& tagName, Document
 Ref<HTMLVideoElement> HTMLVideoElement::create(const QualifiedName& tagName, Document& document, bool createdByParser)
 {
     auto videoElement = adoptRef(*new HTMLVideoElement(tagName, document, createdByParser));
+    videoElement->finishInitialization();
     videoElement->suspendIfNeeded();
     return videoElement;
 }
@@ -153,14 +152,21 @@ void HTMLVideoElement::parseAttribute(const QualifiedName& name, const AtomicStr
 
 bool HTMLVideoElement::supportsFullscreen(HTMLMediaElementEnums::VideoFullscreenMode videoFullscreenMode) const
 {
-    if (videoFullscreenMode == HTMLMediaElementEnums::VideoFullscreenModePictureInPicture && !mediaSession().allowsPictureInPicture(*this))
+    if (!player())
         return false;
+    
+    if (videoFullscreenMode == HTMLMediaElementEnums::VideoFullscreenModePictureInPicture) {
+        if (!mediaSession().allowsPictureInPicture(*this))
+            return false;
+        if (!player()->supportsPictureInPicture())
+            return false;
+    }
 
     Page* page = document().page();
     if (!page) 
         return false;
 
-    if (!player() || !player()->supportsFullscreen())
+    if (!player()->supportsFullscreen())
         return false;
 
 #if PLATFORM(IOS)
@@ -245,7 +251,7 @@ void HTMLVideoElement::setDisplayMode(DisplayMode mode)
     if (player() && player()->canLoadPoster()) {
         bool canLoad = true;
         if (!poster.isEmpty()) {
-            if (Frame* frame = document().frame())
+            if (RefPtr<Frame> frame = document().frame())
                 canLoad = frame->loader().willLoadMediaElementURL(poster);
         }
         if (canLoad)
@@ -268,7 +274,7 @@ void HTMLVideoElement::updateDisplayState()
 
 void HTMLVideoElement::paintCurrentFrameInContext(GraphicsContext& context, const FloatRect& destRect)
 {
-    MediaPlayer* player = HTMLMediaElement::player();
+    RefPtr<MediaPlayer> player = HTMLMediaElement::player();
     if (!player)
         return;
     
@@ -301,13 +307,14 @@ NativeImagePtr HTMLVideoElement::nativeImageForCurrentTime()
 
 ExceptionOr<void> HTMLVideoElement::webkitEnterFullscreen()
 {
+    LOG(Media, "HTMLVideoElement::webkitEnterFullscreen(%p)", this);
     if (isFullscreen())
         return { };
 
     // Generate an exception if this isn't called in response to a user gesture, or if the 
     // element does not support fullscreen.
     if (!mediaSession().fullscreenPermitted(*this) || !supportsFullscreen(HTMLMediaElementEnums::VideoFullscreenModeStandard))
-        return Exception { INVALID_STATE_ERR };
+        return Exception { InvalidStateError };
 
     enterFullscreen();
     return { };
@@ -315,6 +322,7 @@ ExceptionOr<void> HTMLVideoElement::webkitEnterFullscreen()
 
 void HTMLVideoElement::webkitExitFullscreen()
 {
+    LOG(Media, "HTMLVideoElement::webkitExitFullscreen(%p)", this);
     if (isFullscreen())
         exitFullscreen();
 }
@@ -353,11 +361,11 @@ void HTMLVideoElement::setWebkitWirelessVideoPlaybackDisabled(bool disabled)
 }
 #endif
 
-void HTMLVideoElement::didMoveToNewDocument(Document& oldDocument)
+void HTMLVideoElement::didMoveToNewDocument(Document& oldDocument, Document& newDocument)
 {
     if (m_imageLoader)
         m_imageLoader->elementDidMoveToNewDocument();
-    HTMLMediaElement::didMoveToNewDocument(oldDocument);
+    HTMLMediaElement::didMoveToNewDocument(oldDocument, newDocument);
 }
 
 #if ENABLE(MEDIA_STATISTICS)
@@ -391,7 +399,7 @@ URL HTMLVideoElement::posterImageURL() const
 bool HTMLVideoElement::webkitSupportsPresentationMode(VideoPresentationMode mode) const
 {
     if (mode == VideoPresentationMode::Fullscreen)
-        return mediaSession().fullscreenPermitted(*this) && supportsFullscreen(HTMLMediaElementEnums::VideoFullscreenModeStandard);
+        return supportsFullscreen(HTMLMediaElementEnums::VideoFullscreenModeStandard);
 
     if (mode == VideoPresentationMode::PictureInPicture) {
 #if PLATFORM(COCOA)
@@ -399,7 +407,7 @@ bool HTMLVideoElement::webkitSupportsPresentationMode(VideoPresentationMode mode
             return false;
 #endif
 
-        return mediaSession().allowsPictureInPicture(*this) && supportsFullscreen(HTMLMediaElementEnums::VideoFullscreenModePictureInPicture);
+        return supportsFullscreen(HTMLMediaElementEnums::VideoFullscreenModePictureInPicture);
     }
 
     if (mode == VideoPresentationMode::Inline)
@@ -424,6 +432,7 @@ static inline HTMLMediaElementEnums::VideoFullscreenMode toFullscreenMode(HTMLVi
 
 void HTMLVideoElement::webkitSetPresentationMode(VideoPresentationMode mode)
 {
+    LOG(Media, "HTMLVideoElement::webkitSetPresentationMode(%p) - %d", this, mode);
     setFullscreenMode(toFullscreenMode(mode));
 }
 

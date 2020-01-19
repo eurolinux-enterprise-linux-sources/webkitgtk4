@@ -31,6 +31,7 @@
 #include "CSSValueKeywords.h"
 #include "CSSValueList.h"
 #include "CSSValuePool.h"
+#include "Color.h"
 #include "Document.h"
 #include "PropertySetCSSStyleDeclaration.h"
 #include "StylePropertyShorthand.h"
@@ -41,7 +42,6 @@
 
 #ifndef NDEBUG
 #include <stdio.h>
-#include <wtf/ASCIICType.h>
 #include <wtf/text/CString.h>
 #endif
 
@@ -84,9 +84,7 @@ MutableStyleProperties::MutableStyleProperties(const CSSProperty* properties, un
         m_propertyVector.uncheckedAppend(properties[i]);
 }
 
-MutableStyleProperties::~MutableStyleProperties()
-{
-}
+MutableStyleProperties::~MutableStyleProperties() = default;
 
 ImmutableStyleProperties::ImmutableStyleProperties(const CSSProperty* properties, unsigned length, CSSParserMode cssParserMode)
     : StyleProperties(cssParserMode, length)
@@ -131,10 +129,8 @@ String StyleProperties::getPropertyValue(CSSPropertyID propertyID) const
     const StylePropertyShorthand& shorthand = shorthandForProperty(propertyID);
     if (shorthand.length()) {
         RefPtr<CSSValue> value = getPropertyCSSValueInternal(shorthand.properties()[0]);
-        if (!value)
+        if (!value || value->isPendingSubstitutionValue())
             return String();
-        if (value->isPendingSubstitutionValue())
-            return downcast<CSSPendingSubstitutionValue>(*value).shorthandValue()->cssText();
     }
 
     // Shorthand and 4-values properties
@@ -187,6 +183,12 @@ String StyleProperties::getPropertyValue(CSSPropertyID propertyID) const
         return getShorthandValue(gridColumnShorthand());
     case CSSPropertyGridRow:
         return getShorthandValue(gridRowShorthand());
+    case CSSPropertyPlaceContent:
+        return getAlignmentShorthandValue(placeContentShorthand());
+    case CSSPropertyPlaceItems:
+        return getAlignmentShorthandValue(placeItemsShorthand());
+    case CSSPropertyPlaceSelf:
+        return getAlignmentShorthandValue(placeSelfShorthand());
     case CSSPropertyFont:
         return fontValue();
     case CSSPropertyMargin:
@@ -236,6 +238,22 @@ String StyleProperties::getPropertyValue(CSSPropertyID propertyID) const
     }
 }
 
+std::optional<Color> StyleProperties::propertyAsColor(CSSPropertyID property) const
+{
+    auto colorValue = getPropertyCSSValue(property);
+    if (!is<CSSPrimitiveValue>(colorValue))
+        return std::nullopt;
+
+    auto& primitiveColor = downcast<CSSPrimitiveValue>(*colorValue);
+    return primitiveColor.isRGBColor() ? primitiveColor.color() : CSSParser::parseColor(colorValue->cssText());
+}
+
+CSSValueID StyleProperties::propertyAsValueID(CSSPropertyID property) const
+{
+    auto cssValue = getPropertyCSSValue(property);
+    return is<CSSPrimitiveValue>(cssValue) ? downcast<CSSPrimitiveValue>(*cssValue).valueID() : CSSValueInvalid;
+}
+
 String StyleProperties::getCustomPropertyValue(const String& propertyName) const
 {
     RefPtr<CSSValue> value = getCustomPropertyCSSValue(propertyName);
@@ -280,6 +298,7 @@ void StyleProperties::appendFontLonghandValueIfExplicit(CSSPropertyID propertyID
     case CSSPropertyFontFamily:
     case CSSPropertyFontVariantCaps:
     case CSSPropertyFontWeight:
+    case CSSPropertyFontStretch:
         prefix = ' ';
         break;
     case CSSPropertyLineHeight:
@@ -314,6 +333,7 @@ String StyleProperties::fontValue() const
     appendFontLonghandValueIfExplicit(CSSPropertyFontStyle, result, commonValue);
     appendFontLonghandValueIfExplicit(CSSPropertyFontVariantCaps, result, commonValue);
     appendFontLonghandValueIfExplicit(CSSPropertyFontWeight, result, commonValue);
+    appendFontLonghandValueIfExplicit(CSSPropertyFontStretch, result, commonValue);
     if (!result.isEmpty())
         result.append(' ');
     result.append(fontSizeProperty.value()->cssText());
@@ -579,6 +599,14 @@ String StyleProperties::getCommonValue(const StylePropertyShorthand& shorthand) 
         lastPropertyWasImportant = currentPropertyIsImportant;
     }
     return res;
+}
+
+String StyleProperties::getAlignmentShorthandValue(const StylePropertyShorthand& shorthand) const
+{
+    String value = getCommonValue(shorthand);
+    if (value.isNull() || value.isEmpty())
+        return getShorthandValue(shorthand);
+    return value;
 }
 
 String StyleProperties::borderPropertyValue(CommonValueMode valueMode) const
@@ -1133,7 +1161,7 @@ void MutableStyleProperties::mergeAndOverrideOnConflict(const StyleProperties& o
         addParsedProperty(other.propertyAt(i).toCSSProperty());
 }
 
-bool StyleProperties::traverseSubresources(const std::function<bool (const CachedResource&)>& handler) const
+bool StyleProperties::traverseSubresources(const WTF::Function<bool (const CachedResource&)>& handler) const
 {
     unsigned size = propertyCount();
     for (unsigned i = 0; i < size; ++i) {
@@ -1151,6 +1179,7 @@ static const CSSPropertyID blockProperties[] = {
     CSSPropertyWebkitAspectRatio,
     CSSPropertyColumnCount,
     CSSPropertyColumnGap,
+    CSSPropertyRowGap,
     CSSPropertyColumnRuleColor,
     CSSPropertyColumnRuleStyle,
     CSSPropertyColumnRuleWidth,
@@ -1161,11 +1190,6 @@ static const CSSPropertyID blockProperties[] = {
     CSSPropertyPageBreakAfter,
     CSSPropertyPageBreakBefore,
     CSSPropertyPageBreakInside,
-#if ENABLE(CSS_REGIONS)
-    CSSPropertyWebkitRegionBreakAfter,
-    CSSPropertyWebkitRegionBreakBefore,
-    CSSPropertyWebkitRegionBreakInside,
-#endif
     CSSPropertyTextAlign,
 #if ENABLE(CSS3_TEXT)
     CSSPropertyWebkitTextAlignLast,
@@ -1313,25 +1337,25 @@ PropertySetCSSStyleDeclaration* MutableStyleProperties::cssStyleDeclaration()
     return m_cssomWrapper.get();
 }
 
-CSSStyleDeclaration* MutableStyleProperties::ensureCSSStyleDeclaration()
+CSSStyleDeclaration& MutableStyleProperties::ensureCSSStyleDeclaration()
 {
     if (m_cssomWrapper) {
         ASSERT(!static_cast<CSSStyleDeclaration*>(m_cssomWrapper.get())->parentRule());
         ASSERT(!m_cssomWrapper->parentElement());
-        return m_cssomWrapper.get();
+        return *m_cssomWrapper;
     }
-    m_cssomWrapper = std::make_unique<PropertySetCSSStyleDeclaration>(this);
-    return m_cssomWrapper.get();
+    m_cssomWrapper = std::make_unique<PropertySetCSSStyleDeclaration>(*this);
+    return *m_cssomWrapper;
 }
 
-CSSStyleDeclaration* MutableStyleProperties::ensureInlineCSSStyleDeclaration(StyledElement* parentElement)
+CSSStyleDeclaration& MutableStyleProperties::ensureInlineCSSStyleDeclaration(StyledElement& parentElement)
 {
     if (m_cssomWrapper) {
-        ASSERT(m_cssomWrapper->parentElement() == parentElement);
-        return m_cssomWrapper.get();
+        ASSERT(m_cssomWrapper->parentElement() == &parentElement);
+        return *m_cssomWrapper;
     }
-    m_cssomWrapper = std::make_unique<InlineCSSStyleDeclaration>(this, parentElement);
-    return m_cssomWrapper.get();
+    m_cssomWrapper = std::make_unique<InlineCSSStyleDeclaration>(*this, parentElement);
+    return *m_cssomWrapper;
 }
 
 unsigned StyleProperties::averageSizeInBytes()
@@ -1396,9 +1420,7 @@ DeferredStyleProperties::DeferredStyleProperties(const CSSParserTokenRange& rang
     m_tokens.append(range.begin(), length);
 }
     
-DeferredStyleProperties::~DeferredStyleProperties()
-{
-}
+DeferredStyleProperties::~DeferredStyleProperties() = default;
 
 Ref<ImmutableStyleProperties> DeferredStyleProperties::parseDeferredProperties()
 {

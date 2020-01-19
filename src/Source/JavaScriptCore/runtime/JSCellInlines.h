@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,7 +29,7 @@
 #include "CallFrame.h"
 #include "DeferGC.h"
 #include "Handle.h"
-#include "JSCell.h"
+#include "JSCast.h"
 #include "JSDestructibleObject.h"
 #include "JSObject.h"
 #include "JSString.h"
@@ -126,60 +126,63 @@ inline void JSCell::visitOutputConstraints(JSCell*, SlotVisitor&)
 
 ALWAYS_INLINE VM& ExecState::vm() const
 {
-    ASSERT(callee());
-    ASSERT(callee()->vm());
-    ASSERT(!callee()->isLargeAllocation());
+    JSCell* callee = this->callee().asCell();
+    ASSERT(callee);
+    ASSERT(callee->vm());
+    ASSERT(!callee->isLargeAllocation());
     // This is an important optimization since we access this so often.
-    return *callee()->markedBlock().vm();
+    return *callee->markedBlock().vm();
 }
 
 template<typename CellType>
-Subspace* JSCell::subspaceFor(VM& vm)
+CompleteSubspace* JSCell::subspaceFor(VM& vm)
 {
     if (CellType::needsDestruction)
         return &vm.destructibleCellSpace;
-    return &vm.cellSpace;
+    return &vm.cellDangerousBitsSpace;
+}
+
+template<typename T>
+ALWAYS_INLINE void* tryAllocateCellHelper(Heap& heap, size_t size, GCDeferralContext* deferralContext, AllocationFailureMode failureMode)
+{
+    VM& vm = *heap.vm();
+    ASSERT(deferralContext || !DisallowGC::isInEffectOnCurrentThread());
+    ASSERT(size >= sizeof(T));
+    JSCell* result = static_cast<JSCell*>(subspaceFor<T>(vm)->allocateNonVirtual(vm, size, deferralContext, failureMode));
+    if (failureMode == AllocationFailureMode::ReturnNull && !result)
+        return nullptr;
+#if ENABLE(GC_VALIDATION)
+    ASSERT(!vm.isInitializingObject());
+    vm.setInitializingObjectClass(T::info());
+#endif
+    result->clearStructure();
+    return result;
 }
 
 template<typename T>
 void* allocateCell(Heap& heap, size_t size)
 {
-    ASSERT(!DisallowGC::isGCDisallowedOnCurrentThread());
-    ASSERT(size >= sizeof(T));
-    JSCell* result = static_cast<JSCell*>(subspaceFor<T>(*heap.vm())->allocate(size));
-#if ENABLE(GC_VALIDATION)
-    ASSERT(!heap.vm()->isInitializingObject());
-    heap.vm()->setInitializingObjectClass(T::info());
-#endif
-    result->clearStructure();
-    return result;
+    return tryAllocateCellHelper<T>(heap, size, nullptr, AllocationFailureMode::Assert);
 }
-    
+
 template<typename T>
-void* allocateCell(Heap& heap)
+void* tryAllocateCell(Heap& heap, size_t size)
 {
-    return allocateCell<T>(heap, sizeof(T));
+    return tryAllocateCellHelper<T>(heap, size, nullptr, AllocationFailureMode::ReturnNull);
 }
-    
+
 template<typename T>
 void* allocateCell(Heap& heap, GCDeferralContext* deferralContext, size_t size)
 {
-    ASSERT(size >= sizeof(T));
-    JSCell* result = static_cast<JSCell*>(subspaceFor<T>(*heap.vm())->allocate(deferralContext, size));
-#if ENABLE(GC_VALIDATION)
-    ASSERT(!heap.vm()->isInitializingObject());
-    heap.vm()->setInitializingObjectClass(T::info());
-#endif
-    result->clearStructure();
-    return result;
+    return tryAllocateCellHelper<T>(heap, size, deferralContext, AllocationFailureMode::Assert);
 }
-    
+
 template<typename T>
-void* allocateCell(Heap& heap, GCDeferralContext* deferralContext)
+void* tryAllocateCell(Heap& heap, GCDeferralContext* deferralContext, size_t size)
 {
-    return allocateCell<T>(heap, deferralContext, sizeof(T));
+    return tryAllocateCellHelper<T>(heap, size, deferralContext, AllocationFailureMode::ReturnNull);
 }
-    
+
 inline bool JSCell::isObject() const
 {
     return TypeInfo::isObject(m_type);
@@ -188,6 +191,11 @@ inline bool JSCell::isObject() const
 inline bool JSCell::isString() const
 {
     return m_type == StringType;
+}
+
+inline bool JSCell::isBigInt() const
+{
+    return m_type == BigIntType;
 }
 
 inline bool JSCell::isSymbol() const
@@ -278,9 +286,9 @@ ALWAYS_INLINE const ClassInfo* JSCell::classInfo(VM& vm) const
     // What we really want to assert here is that we're not currently destructing this object (which makes its classInfo
     // invalid). If mutatorState() == MutatorState::Running, then we're not currently sweeping, and therefore cannot be
     // destructing the object. The GC thread or JIT threads, unlike the mutator thread, are able to access classInfo
-    // independent of whether the mutator thread is sweeping or not. Hence, we also check for ownerThread() !=
-    // std::this_thread::get_id() to allow the GC thread or JIT threads to pass this assertion.
-    ASSERT(vm.heap.mutatorState() != MutatorState::Sweeping || vm.apiLock().ownerThread() != std::this_thread::get_id());
+    // independent of whether the mutator thread is sweeping or not. Hence, we also check for !currentThreadIsHoldingAPILock()
+    // to allow the GC thread or JIT threads to pass this assertion.
+    ASSERT(vm.heap.mutatorState() != MutatorState::Sweeping || !vm.currentThreadIsHoldingAPILock());
     return structure(vm)->classInfo();
 }
 
@@ -315,28 +323,42 @@ inline void JSCell::callDestructor(VM& vm)
     zap();
 }
 
-inline void JSCell::lock()
+inline void JSCellLock::lock()
 {
     Atomic<IndexingType>* lock = bitwise_cast<Atomic<IndexingType>*>(&m_indexingTypeAndMisc);
-    IndexingTypeLockAlgorithm::lock(*lock);
+    if (UNLIKELY(!IndexingTypeLockAlgorithm::lockFast(*lock)))
+        lockSlow();
 }
 
-inline bool JSCell::tryLock()
+inline bool JSCellLock::tryLock()
 {
     Atomic<IndexingType>* lock = bitwise_cast<Atomic<IndexingType>*>(&m_indexingTypeAndMisc);
     return IndexingTypeLockAlgorithm::tryLock(*lock);
 }
 
-inline void JSCell::unlock()
+inline void JSCellLock::unlock()
 {
     Atomic<IndexingType>* lock = bitwise_cast<Atomic<IndexingType>*>(&m_indexingTypeAndMisc);
-    IndexingTypeLockAlgorithm::unlock(*lock);
+    if (UNLIKELY(!IndexingTypeLockAlgorithm::unlockFast(*lock)))
+        unlockSlow();
 }
 
-inline bool JSCell::isLocked() const
+inline bool JSCellLock::isLocked() const
 {
     Atomic<IndexingType>* lock = bitwise_cast<Atomic<IndexingType>*>(&m_indexingTypeAndMisc);
     return IndexingTypeLockAlgorithm::isLocked(*lock);
+}
+
+inline bool JSCell::mayBePrototype() const
+{
+    return m_indexingTypeAndMisc & IndexingTypeMayBePrototype;
+}
+
+inline void JSCell::didBecomePrototype()
+{
+    if (mayBePrototype())
+        return;
+    WTF::atomicExchangeOr(&m_indexingTypeAndMisc, IndexingTypeMayBePrototype);
 }
 
 inline JSObject* JSCell::toObject(ExecState* exec, JSGlobalObject* globalObject) const
@@ -344,6 +366,19 @@ inline JSObject* JSCell::toObject(ExecState* exec, JSGlobalObject* globalObject)
     if (isObject())
         return jsCast<JSObject*>(const_cast<JSCell*>(this));
     return toObjectSlow(exec, globalObject);
+}
+
+ALWAYS_INLINE bool JSCell::putInline(ExecState* exec, PropertyName propertyName, JSValue value, PutPropertySlot& slot)
+{
+    auto putMethod = methodTable(exec->vm())->put;
+    if (LIKELY(putMethod == JSObject::put))
+        return JSObject::putInlineForJSObject(asObject(this), exec, propertyName, value, slot);
+    return putMethod(this, exec, propertyName, value, slot);
+}
+
+inline bool isWebAssemblyToJSCallee(const JSCell* cell)
+{
+    return cell->type() == WebAssemblyToJSCalleeType;
 }
 
 } // namespace JSC

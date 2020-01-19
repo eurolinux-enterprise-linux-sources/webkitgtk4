@@ -1,0 +1,24 @@
+diff -up webkitgtk-2.20.3/Source/WebCore/accessibility/AccessibilityObject.cpp.atk_crash webkitgtk-2.20.3/Source/WebCore/accessibility/AccessibilityObject.cpp
+--- webkitgtk-2.20.3/Source/WebCore/accessibility/AccessibilityObject.cpp.atk_crash	2018-04-09 14:00:57.000000000 +0200
++++ webkitgtk-2.20.3/Source/WebCore/accessibility/AccessibilityObject.cpp	2018-07-24 13:40:41.183634369 +0200
+@@ -67,6 +67,7 @@
+ #include "RenderView.h"
+ #include "RenderWidget.h"
+ #include "RenderedPosition.h"
++#include "ScriptDisallowedScope.h"
+ #include "Settings.h"
+ #include "TextCheckerClient.h"
+ #include "TextCheckingHelper.h"
+@@ -1771,7 +1772,11 @@ void AccessibilityObject::updateBackingS
+     // Updating the layout may delete this object.
+     RefPtr<AccessibilityObject> protectedThis(this);
+     if (auto* document = this->document()) {
+-        if (!document->view()->layoutContext().isInRenderTreeLayout() && !document->inRenderTreeUpdate() && !document->inStyleRecalc())
++        if (!document->view()->layoutContext().isInRenderTreeLayout()
++            && !document->inRenderTreeUpdate()
++            && !document->inStyleRecalc()
++            && ScriptDisallowedScope::InMainThread::isScriptAllowed())
++
+             document->updateLayoutIgnorePendingStylesheets();
+     }
+     updateChildrenIfNecessary();

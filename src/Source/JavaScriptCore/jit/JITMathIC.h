@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,7 +36,6 @@
 #include "JITSubGenerator.h"
 #include "LinkBuffer.h"
 #include "Repatch.h"
-#include "SnippetOperand.h"
 
 namespace JSC {
 
@@ -55,6 +54,7 @@ struct MathICGenerationState {
 
 template <typename GeneratorType, bool(*isProfileEmpty)(ArithProfile&)>
 class JITMathIC {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     JITMathIC(ArithProfile* arithProfile)
         : m_arithProfile(arithProfile)
@@ -128,10 +128,10 @@ public:
         return false;
     }
 
-    void generateOutOfLine(VM& vm, CodeBlock* codeBlock, FunctionPtr callReplacement)
+    void generateOutOfLine(CodeBlock* codeBlock, FunctionPtr callReplacement)
     {
         auto linkJumpToOutOfLineSnippet = [&] () {
-            CCallHelpers jit(&vm, codeBlock);
+            CCallHelpers jit(codeBlock);
             auto jump = jit.jump();
             // We don't need a nop sled here because nobody should be jumping into the middle of an IC.
             bool needsBranchCompaction = false;
@@ -139,7 +139,7 @@ public:
             LinkBuffer linkBuffer(jit, m_inlineStart.dataLocation(), jit.m_assembler.buffer().codeSize(), JITCompilationMustSucceed, needsBranchCompaction);
             RELEASE_ASSERT(linkBuffer.isValid());
             linkBuffer.link(jump, CodeLocationLabel(m_code.code()));
-            FINALIZE_CODE(linkBuffer, ("JITMathIC: linking constant jump to out of line stub"));
+            FINALIZE_CODE(linkBuffer, "JITMathIC: linking constant jump to out of line stub");
         };
 
         auto replaceCall = [&] () {
@@ -150,7 +150,7 @@ public:
 
         if (m_generateFastPathOnRepatch) {
 
-            CCallHelpers jit(&vm, codeBlock);
+            CCallHelpers jit(codeBlock);
             MathICGenerationState generationState;
             bool generatedInline = generateInline(jit, generationState, shouldEmitProfiling);
 
@@ -160,13 +160,13 @@ public:
             if (generatedInline) {
                 auto jumpToDone = jit.jump();
 
-                LinkBuffer linkBuffer(vm, jit, codeBlock, JITCompilationCanFail);
+                LinkBuffer linkBuffer(jit, codeBlock, JITCompilationCanFail);
                 if (!linkBuffer.didFailToAllocate()) {
                     linkBuffer.link(generationState.slowPathJumps, slowPathStartLocation());
                     linkBuffer.link(jumpToDone, doneLocation());
 
                     m_code = FINALIZE_CODE_FOR(
-                        codeBlock, linkBuffer, ("JITMathIC: generating out of line fast IC snippet"));
+                        codeBlock, linkBuffer, "JITMathIC: generating out of line fast IC snippet");
 
                     if (!generationState.shouldSlowPathRepatch) {
                         // We won't need to regenerate, so we can wire the slow path call
@@ -190,7 +190,7 @@ public:
         replaceCall();
 
         {
-            CCallHelpers jit(&vm, codeBlock);
+            CCallHelpers jit(codeBlock);
 
             MacroAssembler::JumpList endJumpList; 
             MacroAssembler::JumpList slowPathJumpList; 
@@ -200,7 +200,7 @@ public:
                 return;
             endJumpList.append(jit.jump());
 
-            LinkBuffer linkBuffer(vm, jit, codeBlock, JITCompilationCanFail);
+            LinkBuffer linkBuffer(jit, codeBlock, JITCompilationCanFail);
             if (linkBuffer.didFailToAllocate())
                 return;
 
@@ -208,7 +208,7 @@ public:
             linkBuffer.link(slowPathJumpList, slowPathStartLocation());
 
             m_code = FINALIZE_CODE_FOR(
-                codeBlock, linkBuffer, ("JITMathIC: generating out of line IC snippet"));
+                codeBlock, linkBuffer, "JITMathIC: generating out of line IC snippet");
         }
 
         linkJumpToOutOfLineSnippet();

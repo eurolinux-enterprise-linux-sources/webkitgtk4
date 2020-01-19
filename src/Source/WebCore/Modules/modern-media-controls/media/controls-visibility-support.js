@@ -30,22 +30,36 @@ class ControlsVisibilitySupport extends MediaControllerSupport
     {
         super(mediaController);
 
-        this._controlsAttributeObserver = new MutationObserver(this._updateControls.bind(this));
-        this._controlsAttributeObserver.observe(mediaController.media, { attributes: true, attributeFilter: ["controls"] });
-
         this._updateControls();
     }
 
     // Protected
 
-    destroy()
+    enable()
     {
+        super.enable();
+
+        if (this._controlsAttributeObserver)
+            return;
+
+        this._controlsAttributeObserver = new MutationObserver(this._updateControls.bind(this));
+        this._controlsAttributeObserver.observe(this.mediaController.media, { attributes: true, attributeFilter: ["controls"] });
+    }
+
+    disable()
+    {
+        super.disable();
+
+        if (!this._controlsAttributeObserver)
+            return;
+
         this._controlsAttributeObserver.disconnect();
+        delete this._controlsAttributeObserver;
     }
 
     get mediaEvents()
     {
-        return ["loadedmetadata", "play", "pause"];
+        return ["loadedmetadata", "play", "pause", "webkitcurrentplaybacktargetiswirelesschanged", this.mediaController.fullscreenChangeEventType];
     }
 
     get tracksToMonitor()
@@ -63,15 +77,13 @@ class ControlsVisibilitySupport extends MediaControllerSupport
     _updateControls()
     {
         const media = this.mediaController.media;
+        const host = this.mediaController.host;
+        const shouldShowControls = !!(media.controls || (host && host.shouldForceControlsDisplay) || this.mediaController.isFullscreen);
         const isVideo = media instanceof HTMLVideoElement && media.videoTracks.length > 0;
-        let shouldShowControls = media.controls && !!media.currentSrc;
-        if (isVideo)
-            shouldShowControls = shouldShowControls && media.readyState > HTMLMediaElement.HAVE_NOTHING;
 
         const controls = this.mediaController.controls;
-        controls.startButton.visible = shouldShowControls;
-        controls.controlsBar.visible = shouldShowControls;
-        controls.controlsBar.fadesWhileIdle = isVideo ? !media.paused : false;
+        controls.visible = shouldShowControls;
+        controls.autoHideController.fadesWhileIdle = isVideo ? !media.paused && !media.webkitCurrentPlaybackTargetIsWireless : false;
     }
 
 }

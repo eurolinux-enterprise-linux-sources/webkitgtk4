@@ -39,6 +39,7 @@
 #include "RenderView.h"
 #include "StyleResolver.h"
 #include "TextControlInnerElements.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/StackStats.h>
 
 #if PLATFORM(IOS)
@@ -49,30 +50,25 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderTextControlSingleLine);
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderTextControlInnerBlock);
+
 RenderTextControlSingleLine::RenderTextControlSingleLine(HTMLInputElement& element, RenderStyle&& style)
     : RenderTextControl(element, WTFMove(style))
 {
 }
 
-RenderTextControlSingleLine::~RenderTextControlSingleLine()
-{
-}
+RenderTextControlSingleLine::~RenderTextControlSingleLine() = default;
 
 inline HTMLElement* RenderTextControlSingleLine::innerSpinButtonElement() const
 {
     return inputElement().innerSpinButtonElement();
 }
 
-LayoutUnit RenderTextControlSingleLine::computeLogicalHeightLimit() const
-{
-    return containerElement() ? contentLogicalHeight() : logicalHeight();
-}
-
 void RenderTextControlSingleLine::centerRenderer(RenderBox& renderer) const
 {
     LayoutUnit logicalHeightDiff = renderer.logicalHeight() - contentLogicalHeight();
-    float center = logicalHeightDiff / 2;
-    renderer.setLogicalTop(renderer.logicalTop() - LayoutUnit(round(center)));
+    renderer.setLogicalTop(renderer.logicalTop() - logicalHeightDiff / 2);
 }
 
 static void setNeedsLayoutOnAncestors(RenderObject* start, RenderObject* ancestor)
@@ -119,7 +115,7 @@ void RenderTextControlSingleLine::layout()
 
     // Set the text block height
     LayoutUnit desiredLogicalHeight = textBlockLogicalHeight();
-    LayoutUnit logicalHeightLimit = computeLogicalHeightLimit();
+    LayoutUnit logicalHeightLimit = logicalHeight();
     if (innerTextRenderer && innerTextRenderer->logicalHeight() > logicalHeightLimit) {
         if (desiredLogicalHeight != innerTextRenderer->logicalHeight())
             setNeedsLayout(MarkOnlyThis);
@@ -152,18 +148,8 @@ void RenderTextControlSingleLine::layout()
     // Center the child block in the block progression direction (vertical centering for horizontal text fields).
     if (!container && innerTextRenderer && innerTextRenderer->height() != contentLogicalHeight())
         centerRenderer(*innerTextRenderer);
-    else
-        centerContainerIfNeeded(containerRenderer);
-
-    // Ignores the paddings for the inner spin button.
-    if (RenderBox* innerSpinBox = innerSpinButtonElement() ? innerSpinButtonElement()->renderBox() : 0) {
-        RenderBox* parentBox = innerSpinBox->parentBox();
-        if (containerRenderer && !containerRenderer->style().isLeftToRightDirection())
-            innerSpinBox->setLogicalLocation(LayoutPoint(-paddingLogicalLeft(), -paddingBefore()));
-        else
-            innerSpinBox->setLogicalLocation(LayoutPoint(parentBox->logicalWidth() - innerSpinBox->logicalWidth() + paddingLogicalRight(), -paddingBefore()));
-        innerSpinBox->setLogicalHeight(logicalHeight() - borderBefore() - borderAfter());
-    }
+    else if (container && containerRenderer && containerRenderer->height() != contentLogicalHeight())
+        centerRenderer(*containerRenderer);
 
     HTMLElement* placeholderElement = inputElement().placeholderElement();
     if (RenderBox* placeholderBox = placeholderElement ? placeholderElement->renderBox() : 0) {
@@ -212,7 +198,7 @@ bool RenderTextControlSingleLine::nodeAtPoint(const HitTestRequest& request, Hit
     //  - we hit the <input> element (e.g. we're over the border or padding), or
     //  - we hit regions not in any decoration buttons.
     HTMLElement* container = containerElement();
-    if (result.innerNode()->isDescendantOf(innerTextElement()) || result.innerNode() == &inputElement() || (container && container == result.innerNode())) {
+    if (result.innerNode()->isDescendantOf(innerTextElement().get()) || result.innerNode() == &inputElement() || (container && container == result.innerNode())) {
         LayoutPoint pointInParent = locationInContainer.point();
         if (container && innerBlockElement()) {
             if (innerBlockElement()->renderBox())
@@ -242,7 +228,7 @@ void RenderTextControlSingleLine::styleDidChange(StyleDifference diff, const Ren
         containerRenderer->mutableStyle().setWidth(Length());
     }
     if (diff == StyleDifferenceLayout) {
-        if (auto* innerTextRenderer = innerTextElement()->renderer())
+        if (auto innerTextRenderer = innerTextElement()->renderer())
             innerTextRenderer->setNeedsLayout(MarkContainingBlockChain);
         if (auto* placeholder = inputElement().placeholderElement()) {
             if (placeholder->renderer())
@@ -358,13 +344,13 @@ int RenderTextControlSingleLine::scrollTop() const
     return RenderBlockFlow::scrollTop();
 }
 
-void RenderTextControlSingleLine::setScrollLeft(int newLeft)
+void RenderTextControlSingleLine::setScrollLeft(int newLeft, ScrollClamping)
 {
     if (innerTextElement())
         innerTextElement()->setScrollLeft(newLeft);
 }
 
-void RenderTextControlSingleLine::setScrollTop(int newTop)
+void RenderTextControlSingleLine::setScrollTop(int newTop, ScrollClamping)
 {
     if (innerTextElement())
         innerTextElement()->setScrollTop(newTop);

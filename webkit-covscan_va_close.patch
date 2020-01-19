@@ -1,0 +1,44 @@
+From 726cf686973683b1af76e3d9f5029cbe6d82edad Mon Sep 17 00:00:00 2001
+From: Tomas Popela <tpopela@redhat.com>
+Date: Tue, 24 Jul 2018 13:21:55 +0200
+Subject: [PATCH 2/2] wip
+
+---
+ Source/WTF/wtf/text/WTFString.cpp | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/Source/WTF/wtf/text/WTFString.cpp b/Source/WTF/wtf/text/WTFString.cpp
+index 9c5edd6a992..57bf1f8d06a 100644
+--- a/Source/WTF/wtf/text/WTFString.cpp
++++ b/Source/WTF/wtf/text/WTFString.cpp
+@@ -462,7 +462,7 @@ WTF_ATTRIBUTE_PRINTF(1, 0) static String createWithFormatAndArguments(const char
+     if (strstr(format, "%@")) {
+         auto cfFormat = adoptCF(CFStringCreateWithCString(kCFAllocatorDefault, format, kCFStringEncodingUTF8));
+         auto result = adoptCF(CFStringCreateWithFormatAndArguments(kCFAllocatorDefault, nullptr, cfFormat.get(), args));
+-        va_end(args);
++        va_end(argsCopy);
+         return result.get();
+     }
+ #endif
+@@ -474,12 +474,15 @@ WTF_ATTRIBUTE_PRINTF(1, 0) static String createWithFormatAndArguments(const char
+     char ch;
+     int result = vsnprintf(&ch, 1, format, args);
+ #endif
+-    va_end(args);
+ 
+-    if (result == 0)
++    if (!result) {
++        va_end(argsCopy);
+         return emptyString();
+-    if (result < 0)
++    }
++    if (result < 0) {
++        va_end(argsCopy);
+         return String();
++    }
+ 
+     Vector<char, 256> buffer;
+     unsigned len = result;
+-- 
+2.17.1
+

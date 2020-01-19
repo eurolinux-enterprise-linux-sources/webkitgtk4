@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,6 +36,7 @@
 #include "DOMJITGetterSetter.h"
 #include "DirectArguments.h"
 #include "FTLThunks.h"
+#include "FullCodeOrigin.h"
 #include "FunctionCodeBlock.h"
 #include "GCAwareJITStubRoutine.h"
 #include "GetterSetter.h"
@@ -57,6 +58,7 @@
 #include "StructureRareDataInlines.h"
 #include "StructureStubClearingWatchpoint.h"
 #include "StructureStubInfo.h"
+#include "SuperSampler.h"
 #include "ThunkGenerators.h"
 #include <wtf/CommaPrinter.h>
 #include <wtf/ListDump.h>
@@ -89,8 +91,7 @@ void ftlThunkAwareRepatchCall(CodeBlock* codeBlock, CodeLocationCall call, Funct
             MacroAssemblerCodePtr::createFromExecutableAddress(
                 MacroAssembler::readCallTarget(call).executableAddress()));
         key = key.withCallTarget(newCalleeFunction.executableAddress());
-        newCalleeFunction = FunctionPtr(
-            thunks.getSlowPathCallThunk(vm, key).code().executableAddress());
+        newCalleeFunction = FunctionPtr(thunks.getSlowPathCallThunk(key).code());
     }
 #else // ENABLE(FTL_JIT)
     UNUSED_PARAM(codeBlock);
@@ -138,201 +139,257 @@ static bool forceICFailure(ExecState*)
 #endif
 }
 
-inline J_JITOperation_ESsiJI appropriateOptimizingGetByIdFunction(GetByIDKind kind)
+ALWAYS_INLINE static void fireWatchpointsAndClearStubIfNeeded(VM& vm, StructureStubInfo& stubInfo, CodeBlock* codeBlock, AccessGenerationResult& result)
 {
-    if (kind == GetByIDKind::Normal)
-        return operationGetByIdOptimize;
-    return operationTryGetByIdOptimize;
+    if (result.shouldResetStubAndFireWatchpoints()) {
+        result.fireWatchpoints(vm);
+        stubInfo.reset(codeBlock);
+    }
 }
 
-inline J_JITOperation_ESsiJI appropriateGenericGetByIdFunction(GetByIDKind kind)
+inline FunctionPtr appropriateOptimizingGetByIdFunction(GetByIDKind kind)
 {
-    if (kind == GetByIDKind::Normal)
+    switch (kind) {
+    case GetByIDKind::Normal:
+        return operationGetByIdOptimize;
+    case GetByIDKind::WithThis:
+        return operationGetByIdWithThisOptimize;
+    case GetByIDKind::Try:
+        return operationTryGetByIdOptimize;
+    case GetByIDKind::Direct:
+        return operationGetByIdDirectOptimize;
+    }
+    ASSERT_NOT_REACHED();
+    return operationGetById;
+}
+
+inline FunctionPtr appropriateGetByIdFunction(GetByIDKind kind)
+{
+    switch (kind) {
+    case GetByIDKind::Normal:
         return operationGetById;
-    return operationTryGetById;
+    case GetByIDKind::WithThis:
+        return operationGetByIdWithThis;
+    case GetByIDKind::Try:
+        return operationTryGetById;
+    case GetByIDKind::Direct:
+        return operationGetByIdDirect;
+    }
+    ASSERT_NOT_REACHED();
+    return operationGetById;
 }
 
 static InlineCacheAction tryCacheGetByID(ExecState* exec, JSValue baseValue, const Identifier& propertyName, const PropertySlot& slot, StructureStubInfo& stubInfo, GetByIDKind kind)
 {
-    if (forceICFailure(exec))
-        return GiveUpOnCache;
-    
-    // FIXME: Cache property access for immediates.
-    if (!baseValue.isCell())
-        return GiveUpOnCache;
-
-    CodeBlock* codeBlock = exec->codeBlock();
     VM& vm = exec->vm();
+    AccessGenerationResult result;
 
-    std::unique_ptr<AccessCase> newCase;
+    {
+        GCSafeConcurrentJSLocker locker(exec->codeBlock()->m_lock, exec->vm().heap);
 
-    if (propertyName == vm.propertyNames->length) {
-        if (isJSArray(baseValue)) {
+        if (forceICFailure(exec))
+            return GiveUpOnCache;
+        
+        // FIXME: Cache property access for immediates.
+        if (!baseValue.isCell())
+            return GiveUpOnCache;
+
+        CodeBlock* codeBlock = exec->codeBlock();
+
+        std::unique_ptr<AccessCase> newCase;
+
+        if (propertyName == vm.propertyNames->length) {
+            if (isJSArray(baseValue)) {
+                if (stubInfo.cacheType == CacheType::Unset
+                    && slot.slotBase() == baseValue
+                    && InlineAccess::isCacheableArrayLength(stubInfo, jsCast<JSArray*>(baseValue))) {
+
+                    bool generatedCodeInline = InlineAccess::generateArrayLength(stubInfo, jsCast<JSArray*>(baseValue));
+                    if (generatedCodeInline) {
+                        ftlThunkAwareRepatchCall(codeBlock, stubInfo.slowPathCallLocation(), appropriateOptimizingGetByIdFunction(kind));
+                        stubInfo.initArrayLength();
+                        return RetryCacheLater;
+                    }
+                }
+
+                newCase = AccessCase::create(vm, codeBlock, AccessCase::ArrayLength);
+            } else if (isJSString(baseValue))
+                newCase = AccessCase::create(vm, codeBlock, AccessCase::StringLength);
+            else if (DirectArguments* arguments = jsDynamicCast<DirectArguments*>(vm, baseValue)) {
+                // If there were overrides, then we can handle this as a normal property load! Guarding
+                // this with such a check enables us to add an IC case for that load if needed.
+                if (!arguments->overrodeThings())
+                    newCase = AccessCase::create(vm, codeBlock, AccessCase::DirectArgumentsLength);
+            } else if (ScopedArguments* arguments = jsDynamicCast<ScopedArguments*>(vm, baseValue)) {
+                // Ditto.
+                if (!arguments->overrodeThings())
+                    newCase = AccessCase::create(vm, codeBlock, AccessCase::ScopedArgumentsLength);
+            }
+        }
+
+        if (!propertyName.isSymbol() && isJSModuleNamespaceObject(baseValue) && !slot.isUnset()) {
+            if (auto moduleNamespaceSlot = slot.moduleNamespaceSlot())
+                newCase = ModuleNamespaceAccessCase::create(vm, codeBlock, jsCast<JSModuleNamespaceObject*>(baseValue), moduleNamespaceSlot->environment, ScopeOffset(moduleNamespaceSlot->scopeOffset));
+        }
+        
+        if (!newCase) {
+            if (!slot.isCacheable() && !slot.isUnset())
+                return GiveUpOnCache;
+
+            ObjectPropertyConditionSet conditionSet;
+            JSCell* baseCell = baseValue.asCell();
+            Structure* structure = baseCell->structure(vm);
+
+            bool loadTargetFromProxy = false;
+            if (baseCell->type() == PureForwardingProxyType) {
+                baseValue = jsCast<JSProxy*>(baseCell)->target();
+                baseCell = baseValue.asCell();
+                structure = baseCell->structure(vm);
+                loadTargetFromProxy = true;
+            }
+
+            InlineCacheAction action = actionForCell(vm, baseCell);
+            if (action != AttemptToCache)
+                return action;
+
+            // Optimize self access.
             if (stubInfo.cacheType == CacheType::Unset
+                && slot.isCacheableValue()
                 && slot.slotBase() == baseValue
-                && InlineAccess::isCacheableArrayLength(stubInfo, jsCast<JSArray*>(baseValue))) {
+                && !slot.watchpointSet()
+                && !structure->needImpurePropertyWatchpoint()
+                && !loadTargetFromProxy) {
 
-                bool generatedCodeInline = InlineAccess::generateArrayLength(*codeBlock->vm(), stubInfo, jsCast<JSArray*>(baseValue));
+                bool generatedCodeInline = InlineAccess::generateSelfPropertyAccess(stubInfo, structure, slot.cachedOffset());
                 if (generatedCodeInline) {
+                    LOG_IC((ICEvent::GetByIdSelfPatch, structure->classInfo(), propertyName));
+                    structure->startWatchingPropertyForReplacements(vm, slot.cachedOffset());
                     ftlThunkAwareRepatchCall(codeBlock, stubInfo.slowPathCallLocation(), appropriateOptimizingGetByIdFunction(kind));
-                    stubInfo.initArrayLength();
+                    stubInfo.initGetByIdSelf(codeBlock, structure, slot.cachedOffset());
                     return RetryCacheLater;
                 }
             }
 
-            newCase = AccessCase::create(vm, codeBlock, AccessCase::ArrayLength);
-        } else if (isJSString(baseValue))
-            newCase = AccessCase::create(vm, codeBlock, AccessCase::StringLength);
-        else if (DirectArguments* arguments = jsDynamicCast<DirectArguments*>(vm, baseValue)) {
-            // If there were overrides, then we can handle this as a normal property load! Guarding
-            // this with such a check enables us to add an IC case for that load if needed.
-            if (!arguments->overrodeThings())
-                newCase = AccessCase::create(vm, codeBlock, AccessCase::DirectArgumentsLength);
-        } else if (ScopedArguments* arguments = jsDynamicCast<ScopedArguments*>(vm, baseValue)) {
-            // Ditto.
-            if (!arguments->overrodeThings())
-                newCase = AccessCase::create(vm, codeBlock, AccessCase::ScopedArgumentsLength);
-        }
-    }
+            std::unique_ptr<PolyProtoAccessChain> prototypeAccessChain;
 
-    if (!propertyName.isSymbol() && isJSModuleNamespaceObject(baseValue) && !slot.isUnset()) {
-        if (auto moduleNamespaceSlot = slot.moduleNamespaceSlot())
-            newCase = ModuleNamespaceAccessCase::create(vm, codeBlock, jsCast<JSModuleNamespaceObject*>(baseValue), moduleNamespaceSlot->environment, ScopeOffset(moduleNamespaceSlot->scopeOffset));
-    }
-    
-    if (!newCase) {
-        if (!slot.isCacheable() && !slot.isUnset())
-            return GiveUpOnCache;
+            PropertyOffset offset = slot.isUnset() ? invalidOffset : slot.cachedOffset();
 
-        ObjectPropertyConditionSet conditionSet;
-        JSCell* baseCell = baseValue.asCell();
-        Structure* structure = baseCell->structure(vm);
-
-        bool loadTargetFromProxy = false;
-        if (baseCell->type() == PureForwardingProxyType) {
-            baseValue = jsCast<JSProxy*>(baseCell)->target();
-            baseCell = baseValue.asCell();
-            structure = baseCell->structure(vm);
-            loadTargetFromProxy = true;
-        }
-
-        InlineCacheAction action = actionForCell(vm, baseCell);
-        if (action != AttemptToCache)
-            return action;
-
-        // Optimize self access.
-        if (stubInfo.cacheType == CacheType::Unset
-            && slot.isCacheableValue()
-            && slot.slotBase() == baseValue
-            && !slot.watchpointSet()
-            && !structure->needImpurePropertyWatchpoint()
-            && !loadTargetFromProxy) {
-
-            bool generatedCodeInline = InlineAccess::generateSelfPropertyAccess(*codeBlock->vm(), stubInfo, structure, slot.cachedOffset());
-            if (generatedCodeInline) {
-                LOG_IC((ICEvent::GetByIdSelfPatch, structure->classInfo(), propertyName));
-                structure->startWatchingPropertyForReplacements(vm, slot.cachedOffset());
-                ftlThunkAwareRepatchCall(codeBlock, stubInfo.slowPathCallLocation(), appropriateOptimizingGetByIdFunction(kind));
-                stubInfo.initGetByIdSelf(codeBlock, structure, slot.cachedOffset());
-                return RetryCacheLater;
-            }
-        }
-
-        PropertyOffset offset = slot.isUnset() ? invalidOffset : slot.cachedOffset();
-
-        if (slot.isUnset() || slot.slotBase() != baseValue) {
-            if (structure->typeInfo().prohibitsPropertyCaching())
-                return GiveUpOnCache;
-
-            if (structure->isDictionary()) {
-                if (structure->hasBeenFlattenedBefore())
+            if (slot.isUnset() || slot.slotBase() != baseValue) {
+                if (structure->typeInfo().prohibitsPropertyCaching())
                     return GiveUpOnCache;
-                structure->flattenDictionaryStructure(vm, jsCast<JSObject*>(baseCell));
+
+                if (structure->isDictionary()) {
+                    if (structure->hasBeenFlattenedBefore())
+                        return GiveUpOnCache;
+                    structure->flattenDictionaryStructure(vm, jsCast<JSObject*>(baseCell));
+                }
+
+                if (slot.isUnset() && structure->typeInfo().getOwnPropertySlotIsImpureForPropertyAbsence())
+                    return GiveUpOnCache;
+
+                // If a kind is GetByIDKind::Direct, we do not need to investigate prototype chains further.
+                // Cacheability just depends on the head structure.
+                if (kind != GetByIDKind::Direct) {
+                    bool usesPolyProto;
+                    prototypeAccessChain = PolyProtoAccessChain::create(exec->lexicalGlobalObject(), baseCell, slot, usesPolyProto);
+                    if (!prototypeAccessChain) {
+                        // It's invalid to access this prototype property.
+                        return GiveUpOnCache;
+                    }
+
+                    if (!usesPolyProto) {
+                        // We use ObjectPropertyConditionSet instead for faster accesses.
+                        prototypeAccessChain = nullptr;
+
+                        if (slot.isUnset()) {
+                            conditionSet = generateConditionsForPropertyMiss(
+                                vm, codeBlock, exec, structure, propertyName.impl());
+                        } else {
+                            conditionSet = generateConditionsForPrototypePropertyHit(
+                                vm, codeBlock, exec, structure, slot.slotBase(),
+                                propertyName.impl());
+                        }
+
+                        if (!conditionSet.isValid())
+                            return GiveUpOnCache;
+                    }
+                }
+
+                offset = slot.isUnset() ? invalidOffset : slot.cachedOffset();
             }
-            
-            if (slot.isUnset() && structure->typeInfo().getOwnPropertySlotIsImpureForPropertyAbsence())
-                return GiveUpOnCache;
 
-            if (slot.isUnset()) {
-                conditionSet = generateConditionsForPropertyMiss(
-                    vm, codeBlock, exec, structure, propertyName.impl());
-            } else {
-                conditionSet = generateConditionsForPrototypePropertyHit(
-                    vm, codeBlock, exec, structure, slot.slotBase(),
-                    propertyName.impl());
-            }
-            
-            if (!conditionSet.isValid())
-                return GiveUpOnCache;
+            JSFunction* getter = nullptr;
+            if (slot.isCacheableGetter())
+                getter = jsDynamicCast<JSFunction*>(vm, slot.getterSetter()->getter());
 
-            offset = slot.isUnset() ? invalidOffset : conditionSet.slotBaseCondition().offset();
-        }
+            std::optional<DOMAttributeAnnotation> domAttribute;
+            if (slot.isCacheableCustom() && slot.domAttribute())
+                domAttribute = slot.domAttribute();
 
-        JSFunction* getter = nullptr;
-        if (slot.isCacheableGetter())
-            getter = jsDynamicCast<JSFunction*>(vm, slot.getterSetter()->getter());
-
-        DOMJIT::GetterSetter* domJIT = nullptr;
-        if (slot.isCacheableCustom() && slot.domJIT())
-            domJIT = slot.domJIT();
-
-        if (kind == GetByIDKind::Try) {
-            AccessCase::AccessType type;
-            if (slot.isCacheableValue())
-                type = AccessCase::Load;
-            else if (slot.isUnset())
-                type = AccessCase::Miss;
-            else if (slot.isCacheableGetter())
-                type = AccessCase::GetGetter;
-            else
-                RELEASE_ASSERT_NOT_REACHED();
-
-            newCase = ProxyableAccessCase::create(vm, codeBlock, type, offset, structure, conditionSet, loadTargetFromProxy, slot.watchpointSet());
-        } else if (!loadTargetFromProxy && getter && IntrinsicGetterAccessCase::canEmitIntrinsicGetter(getter, structure))
-            newCase = IntrinsicGetterAccessCase::create(vm, codeBlock, slot.cachedOffset(), structure, conditionSet, getter);
-        else {
-            if (slot.isCacheableValue() || slot.isUnset()) {
-                newCase = ProxyableAccessCase::create(vm, codeBlock, slot.isUnset() ? AccessCase::Miss : AccessCase::Load,
-                    offset, structure, conditionSet, loadTargetFromProxy, slot.watchpointSet());
-            } else {
+            if (kind == GetByIDKind::Try) {
                 AccessCase::AccessType type;
-                if (slot.isCacheableGetter())
-                    type = AccessCase::Getter;
-                else if (slot.attributes() & CustomAccessor)
-                    type = AccessCase::CustomAccessorGetter;
+                if (slot.isCacheableValue())
+                    type = AccessCase::Load;
+                else if (slot.isUnset())
+                    type = AccessCase::Miss;
+                else if (slot.isCacheableGetter())
+                    type = AccessCase::GetGetter;
                 else
-                    type = AccessCase::CustomValueGetter;
+                    RELEASE_ASSERT_NOT_REACHED();
 
-                newCase = GetterSetterAccessCase::create(
-                    vm, codeBlock, type, offset, structure, conditionSet, loadTargetFromProxy,
-                    slot.watchpointSet(), slot.isCacheableCustom() ? slot.customGetter() : nullptr,
-                    slot.isCacheableCustom() ? slot.slotBase() : nullptr,
-                    domJIT);
+                newCase = ProxyableAccessCase::create(vm, codeBlock, type, offset, structure, conditionSet, loadTargetFromProxy, slot.watchpointSet(), WTFMove(prototypeAccessChain));
+            } else if (!loadTargetFromProxy && getter && IntrinsicGetterAccessCase::canEmitIntrinsicGetter(getter, structure))
+                newCase = IntrinsicGetterAccessCase::create(vm, codeBlock, slot.cachedOffset(), structure, conditionSet, getter, WTFMove(prototypeAccessChain));
+            else {
+                if (slot.isCacheableValue() || slot.isUnset()) {
+                    newCase = ProxyableAccessCase::create(vm, codeBlock, slot.isUnset() ? AccessCase::Miss : AccessCase::Load,
+                        offset, structure, conditionSet, loadTargetFromProxy, slot.watchpointSet(), WTFMove(prototypeAccessChain));
+                } else {
+                    AccessCase::AccessType type;
+                    if (slot.isCacheableGetter())
+                        type = AccessCase::Getter;
+                    else if (slot.attributes() & PropertyAttribute::CustomAccessor)
+                        type = AccessCase::CustomAccessorGetter;
+                    else
+                        type = AccessCase::CustomValueGetter;
+
+                    if (kind == GetByIDKind::WithThis && type == AccessCase::CustomAccessorGetter && domAttribute)
+                        return GiveUpOnCache;
+
+                    newCase = GetterSetterAccessCase::create(
+                        vm, codeBlock, type, offset, structure, conditionSet, loadTargetFromProxy,
+                        slot.watchpointSet(), slot.isCacheableCustom() ? slot.customGetter() : nullptr,
+                        slot.isCacheableCustom() ? slot.slotBase() : nullptr,
+                        domAttribute, WTFMove(prototypeAccessChain));
+                }
             }
+        }
+
+        LOG_IC((ICEvent::GetByIdAddAccessCase, baseValue.classInfoOrNull(vm), propertyName));
+
+        result = stubInfo.addAccessCase(locker, codeBlock, propertyName, WTFMove(newCase));
+
+        if (result.generatedSomeCode()) {
+            LOG_IC((ICEvent::GetByIdReplaceWithJump, baseValue.classInfoOrNull(vm), propertyName));
+            
+            RELEASE_ASSERT(result.code());
+            InlineAccess::rewireStubAsJump(stubInfo, CodeLocationLabel(result.code()));
         }
     }
 
-    LOG_IC((ICEvent::GetByIdAddAccessCase, baseValue.classInfoOrNull(vm), propertyName));
+    fireWatchpointsAndClearStubIfNeeded(vm, stubInfo, exec->codeBlock(), result);
 
-    AccessGenerationResult result = stubInfo.addAccessCase(codeBlock, propertyName, WTFMove(newCase));
-
-    if (result.generatedSomeCode()) {
-        LOG_IC((ICEvent::GetByIdReplaceWithJump, baseValue.classInfoOrNull(vm), propertyName));
-        
-        RELEASE_ASSERT(result.code());
-        InlineAccess::rewireStubAsJump(exec->vm(), stubInfo, CodeLocationLabel(result.code()));
-    }
-    
     return result.shouldGiveUpNow() ? GiveUpOnCache : RetryCacheLater;
 }
 
 void repatchGetByID(ExecState* exec, JSValue baseValue, const Identifier& propertyName, const PropertySlot& slot, StructureStubInfo& stubInfo, GetByIDKind kind)
 {
     SuperSamplerScope superSamplerScope(false);
-    GCSafeConcurrentJSLocker locker(exec->codeBlock()->m_lock, exec->vm().heap);
     
-    if (tryCacheGetByID(exec, baseValue, propertyName, slot, stubInfo, kind) == GiveUpOnCache)
-        ftlThunkAwareRepatchCall(exec->codeBlock(), stubInfo.slowPathCallLocation(), appropriateGenericGetByIdFunction(kind));
+    if (tryCacheGetByID(exec, baseValue, propertyName, slot, stubInfo, kind) == GiveUpOnCache) {
+        CodeBlock* codeBlock = exec->codeBlock();
+        ftlThunkAwareRepatchCall(codeBlock, stubInfo.slowPathCallLocation(), FunctionPtr(appropriateGetByIdFunction(kind)));
+    }
 }
 
 static V_JITOperation_ESsiJJI appropriateGenericPutByIdFunction(const PutPropertySlot &slot, PutKind putKind)
@@ -361,182 +418,259 @@ static V_JITOperation_ESsiJJI appropriateOptimizingPutByIdFunction(const PutProp
 
 static InlineCacheAction tryCachePutByID(ExecState* exec, JSValue baseValue, Structure* structure, const Identifier& ident, const PutPropertySlot& slot, StructureStubInfo& stubInfo, PutKind putKind)
 {
-    if (forceICFailure(exec))
-        return GiveUpOnCache;
-    
-    CodeBlock* codeBlock = exec->codeBlock();
     VM& vm = exec->vm();
+    AccessGenerationResult result;
+    {
+        GCSafeConcurrentJSLocker locker(exec->codeBlock()->m_lock, exec->vm().heap);
 
-    if (!baseValue.isCell())
-        return GiveUpOnCache;
-    
-    if (!slot.isCacheablePut() && !slot.isCacheableCustom() && !slot.isCacheableSetter())
-        return GiveUpOnCache;
-
-    if (!structure->propertyAccessesAreCacheable())
-        return GiveUpOnCache;
-
-    std::unique_ptr<AccessCase> newCase;
-
-    if (slot.base() == baseValue && slot.isCacheablePut()) {
-        if (slot.type() == PutPropertySlot::ExistingProperty) {
-            structure->didCachePropertyReplacement(vm, slot.cachedOffset());
+        if (forceICFailure(exec))
+            return GiveUpOnCache;
         
-            if (stubInfo.cacheType == CacheType::Unset
-                && InlineAccess::canGenerateSelfPropertyReplace(stubInfo, slot.cachedOffset())
-                && !structure->needImpurePropertyWatchpoint()
-                && !structure->inferredTypeFor(ident.impl())) {
-                
-                bool generatedCodeInline = InlineAccess::generateSelfPropertyReplace(vm, stubInfo, structure, slot.cachedOffset());
-                if (generatedCodeInline) {
-                    LOG_IC((ICEvent::PutByIdSelfPatch, structure->classInfo(), ident));
-                    ftlThunkAwareRepatchCall(codeBlock, stubInfo.slowPathCallLocation(), appropriateOptimizingPutByIdFunction(slot, putKind));
-                    stubInfo.initPutByIdReplace(codeBlock, structure, slot.cachedOffset());
-                    return RetryCacheLater;
-                }
-            }
+        CodeBlock* codeBlock = exec->codeBlock();
 
-            newCase = AccessCase::create(vm, codeBlock, AccessCase::Replace, slot.cachedOffset(), structure);
-        } else {
-            ASSERT(slot.type() == PutPropertySlot::NewProperty);
+        if (!baseValue.isCell())
+            return GiveUpOnCache;
+        
+        if (!slot.isCacheablePut() && !slot.isCacheableCustom() && !slot.isCacheableSetter())
+            return GiveUpOnCache;
 
-            if (!structure->isObject())
-                return GiveUpOnCache;
+        if (!structure->propertyAccessesAreCacheable())
+            return GiveUpOnCache;
 
-            if (structure->isDictionary()) {
-                if (structure->hasBeenFlattenedBefore())
-                    return GiveUpOnCache;
-                structure->flattenDictionaryStructure(vm, jsCast<JSObject*>(baseValue));
-            }
+        std::unique_ptr<AccessCase> newCase;
+        JSCell* baseCell = baseValue.asCell();
 
-            PropertyOffset offset;
-            Structure* newStructure =
-                Structure::addPropertyTransitionToExistingStructureConcurrently(
-                    structure, ident.impl(), 0, offset);
-            if (!newStructure || !newStructure->propertyAccessesAreCacheable())
-                return GiveUpOnCache;
+        if (slot.base() == baseValue && slot.isCacheablePut()) {
+            if (slot.type() == PutPropertySlot::ExistingProperty) {
+                // This assert helps catch bugs if we accidentally forget to disable caching
+                // when we transition then store to an existing property. This is common among
+                // paths that reify lazy properties. If we reify a lazy property and forget
+                // to disable caching, we may come down this path. The Replace IC does not
+                // know how to model these types of structure transitions (or any structure
+                // transition for that matter).
+                RELEASE_ASSERT(baseValue.asCell()->structure(vm) == structure);
 
-            ASSERT(newStructure->previousID() == structure);
-            ASSERT(!newStructure->isDictionary());
-            ASSERT(newStructure->isObject());
+                structure->didCachePropertyReplacement(vm, slot.cachedOffset());
             
-            ObjectPropertyConditionSet conditionSet;
-            if (putKind == NotDirect) {
-                conditionSet =
-                    generateConditionsForPropertySetterMiss(
-                        vm, codeBlock, exec, newStructure, ident.impl());
-                if (!conditionSet.isValid())
+                if (stubInfo.cacheType == CacheType::Unset
+                    && InlineAccess::canGenerateSelfPropertyReplace(stubInfo, slot.cachedOffset())
+                    && !structure->needImpurePropertyWatchpoint()
+                    && !structure->inferredTypeFor(ident.impl())) {
+                    
+                    bool generatedCodeInline = InlineAccess::generateSelfPropertyReplace(stubInfo, structure, slot.cachedOffset());
+                    if (generatedCodeInline) {
+                        LOG_IC((ICEvent::PutByIdSelfPatch, structure->classInfo(), ident));
+                        ftlThunkAwareRepatchCall(codeBlock, stubInfo.slowPathCallLocation(), appropriateOptimizingPutByIdFunction(slot, putKind));
+                        stubInfo.initPutByIdReplace(codeBlock, structure, slot.cachedOffset());
+                        return RetryCacheLater;
+                    }
+                }
+
+                newCase = AccessCase::create(vm, codeBlock, AccessCase::Replace, slot.cachedOffset(), structure);
+            } else {
+                ASSERT(slot.type() == PutPropertySlot::NewProperty);
+
+                if (!structure->isObject())
                     return GiveUpOnCache;
+
+                if (structure->isDictionary()) {
+                    if (structure->hasBeenFlattenedBefore())
+                        return GiveUpOnCache;
+                    structure->flattenDictionaryStructure(vm, jsCast<JSObject*>(baseValue));
+                }
+
+                PropertyOffset offset;
+                Structure* newStructure =
+                    Structure::addPropertyTransitionToExistingStructureConcurrently(
+                        structure, ident.impl(), 0, offset);
+                if (!newStructure || !newStructure->propertyAccessesAreCacheable())
+                    return GiveUpOnCache;
+
+                ASSERT(newStructure->previousID() == structure);
+                ASSERT(!newStructure->isDictionary());
+                ASSERT(newStructure->isObject());
+                
+                std::unique_ptr<PolyProtoAccessChain> prototypeAccessChain;
+                ObjectPropertyConditionSet conditionSet;
+                if (putKind == NotDirect) {
+                    bool usesPolyProto;
+                    prototypeAccessChain = PolyProtoAccessChain::create(exec->lexicalGlobalObject(), baseCell, nullptr, usesPolyProto);
+                    if (!prototypeAccessChain) {
+                        // It's invalid to access this prototype property.
+                        return GiveUpOnCache;
+                    }
+
+                    if (!usesPolyProto) {
+                        prototypeAccessChain = nullptr;
+                        conditionSet =
+                            generateConditionsForPropertySetterMiss(
+                                vm, codeBlock, exec, newStructure, ident.impl());
+                        if (!conditionSet.isValid())
+                            return GiveUpOnCache;
+                    }
+
+                }
+
+                newCase = AccessCase::create(vm, codeBlock, offset, structure, newStructure, conditionSet, WTFMove(prototypeAccessChain));
             }
+        } else if (slot.isCacheableCustom() || slot.isCacheableSetter()) {
+            if (slot.isCacheableCustom()) {
+                ObjectPropertyConditionSet conditionSet;
+                std::unique_ptr<PolyProtoAccessChain> prototypeAccessChain;
 
-            newCase = AccessCase::create(vm, codeBlock, offset, structure, newStructure, conditionSet);
-        }
-    } else if (slot.isCacheableCustom() || slot.isCacheableSetter()) {
-        if (slot.isCacheableCustom()) {
-            ObjectPropertyConditionSet conditionSet;
+                if (slot.base() != baseValue) {
+                    bool usesPolyProto;
+                    prototypeAccessChain = PolyProtoAccessChain::create(exec->lexicalGlobalObject(), baseCell, slot.base(), usesPolyProto);
+                    if (!prototypeAccessChain) {
+                        // It's invalid to access this prototype property.
+                        return GiveUpOnCache;
+                    }
 
-            if (slot.base() != baseValue) {
-                conditionSet =
-                    generateConditionsForPrototypePropertyHitCustom(
-                        vm, codeBlock, exec, structure, slot.base(), ident.impl());
-                if (!conditionSet.isValid())
-                    return GiveUpOnCache;
+                    if (!usesPolyProto) {
+                        prototypeAccessChain = nullptr;
+                        conditionSet =
+                            generateConditionsForPrototypePropertyHit(
+                                vm, codeBlock, exec, structure, slot.base(), ident.impl());
+                        if (!conditionSet.isValid())
+                            return GiveUpOnCache;
+                    }
+                }
+
+                newCase = GetterSetterAccessCase::create(
+                    vm, codeBlock, slot.isCustomAccessor() ? AccessCase::CustomAccessorSetter : AccessCase::CustomValueSetter, structure, invalidOffset,
+                    conditionSet, WTFMove(prototypeAccessChain), slot.customSetter(), slot.base());
+            } else {
+                ObjectPropertyConditionSet conditionSet;
+                std::unique_ptr<PolyProtoAccessChain> prototypeAccessChain;
+                PropertyOffset offset = slot.cachedOffset();
+
+                if (slot.base() != baseValue) {
+                    bool usesPolyProto;
+                    prototypeAccessChain = PolyProtoAccessChain::create(exec->lexicalGlobalObject(), baseCell, slot.base(), usesPolyProto);
+                    if (!prototypeAccessChain) {
+                        // It's invalid to access this prototype property.
+                        return GiveUpOnCache;
+                    }
+
+                    if (!usesPolyProto) {
+                        prototypeAccessChain = nullptr;
+                        conditionSet =
+                            generateConditionsForPrototypePropertyHit(
+                                vm, codeBlock, exec, structure, slot.base(), ident.impl());
+                        if (!conditionSet.isValid())
+                            return GiveUpOnCache;
+
+                        RELEASE_ASSERT(offset == conditionSet.slotBaseCondition().offset());
+                    }
+
+                }
+
+                newCase = GetterSetterAccessCase::create(
+                    vm, codeBlock, AccessCase::Setter, structure, offset, conditionSet, WTFMove(prototypeAccessChain));
             }
-
-            newCase = GetterSetterAccessCase::create(
-                vm, codeBlock, slot.isCustomAccessor() ? AccessCase::CustomAccessorSetter : AccessCase::CustomValueSetter, structure, invalidOffset, conditionSet,
-                slot.customSetter(), slot.base());
-        } else {
-            ObjectPropertyConditionSet conditionSet;
-            PropertyOffset offset;
-
-            if (slot.base() != baseValue) {
-                conditionSet =
-                    generateConditionsForPrototypePropertyHit(
-                        vm, codeBlock, exec, structure, slot.base(), ident.impl());
-                if (!conditionSet.isValid())
-                    return GiveUpOnCache;
-                offset = conditionSet.slotBaseCondition().offset();
-            } else
-                offset = slot.cachedOffset();
-
-            newCase = GetterSetterAccessCase::create(
-                vm, codeBlock, AccessCase::Setter, structure, offset, conditionSet);
         }
-    }
 
-    LOG_IC((ICEvent::PutByIdAddAccessCase, structure->classInfo(), ident));
-    
-    AccessGenerationResult result = stubInfo.addAccessCase(codeBlock, ident, WTFMove(newCase));
-    
-    if (result.generatedSomeCode()) {
-        LOG_IC((ICEvent::PutByIdReplaceWithJump, structure->classInfo(), ident));
+        LOG_IC((ICEvent::PutByIdAddAccessCase, structure->classInfo(), ident));
         
-        RELEASE_ASSERT(result.code());
+        result = stubInfo.addAccessCase(locker, codeBlock, ident, WTFMove(newCase));
 
-        InlineAccess::rewireStubAsJump(vm, stubInfo, CodeLocationLabel(result.code()));
+        if (result.generatedSomeCode()) {
+            LOG_IC((ICEvent::PutByIdReplaceWithJump, structure->classInfo(), ident));
+            
+            RELEASE_ASSERT(result.code());
+
+            InlineAccess::rewireStubAsJump(stubInfo, CodeLocationLabel(result.code()));
+        }
     }
-    
+
+    fireWatchpointsAndClearStubIfNeeded(vm, stubInfo, exec->codeBlock(), result);
+
     return result.shouldGiveUpNow() ? GiveUpOnCache : RetryCacheLater;
 }
 
 void repatchPutByID(ExecState* exec, JSValue baseValue, Structure* structure, const Identifier& propertyName, const PutPropertySlot& slot, StructureStubInfo& stubInfo, PutKind putKind)
 {
     SuperSamplerScope superSamplerScope(false);
-    GCSafeConcurrentJSLocker locker(exec->codeBlock()->m_lock, exec->vm().heap);
     
     if (tryCachePutByID(exec, baseValue, structure, propertyName, slot, stubInfo, putKind) == GiveUpOnCache)
         ftlThunkAwareRepatchCall(exec->codeBlock(), stubInfo.slowPathCallLocation(), appropriateGenericPutByIdFunction(slot, putKind));
 }
 
-static InlineCacheAction tryRepatchIn(
-    ExecState* exec, JSCell* base, const Identifier& ident, bool wasFound,
-    const PropertySlot& slot, StructureStubInfo& stubInfo)
+static InlineCacheAction tryCacheIn(
+    ExecState* exec, JSCell* base, const Identifier& ident,
+    bool wasFound, const PropertySlot& slot, StructureStubInfo& stubInfo)
 {
-    if (forceICFailure(exec))
-        return GiveUpOnCache;
-    
-    if (!base->structure()->propertyAccessesAreCacheable() || (!wasFound && !base->structure()->propertyAccessesAreCacheableForAbsence()))
-        return GiveUpOnCache;
-    
-    if (wasFound) {
-        if (!slot.isCacheable())
-            return GiveUpOnCache;
-    }
-    
-    CodeBlock* codeBlock = exec->codeBlock();
     VM& vm = exec->vm();
-    Structure* structure = base->structure(vm);
-    
-    ObjectPropertyConditionSet conditionSet;
-    if (wasFound) {
-        if (slot.slotBase() != base) {
-            conditionSet = generateConditionsForPrototypePropertyHit(
-                vm, codeBlock, exec, structure, slot.slotBase(), ident.impl());
-        }
-    } else {
-        conditionSet = generateConditionsForPropertyMiss(
-            vm, codeBlock, exec, structure, ident.impl());
-    }
-    if (!conditionSet.isValid())
-        return GiveUpOnCache;
+    AccessGenerationResult result;
 
-    LOG_IC((ICEvent::InAddAccessCase, structure->classInfo(), ident));
-
-    std::unique_ptr<AccessCase> newCase = AccessCase::create(
-        vm, codeBlock, wasFound ? AccessCase::InHit : AccessCase::InMiss, invalidOffset, structure, conditionSet);
-
-    AccessGenerationResult result = stubInfo.addAccessCase(codeBlock, ident, WTFMove(newCase));
-    
-    if (result.generatedSomeCode()) {
-        LOG_IC((ICEvent::InReplaceWithJump, structure->classInfo(), ident));
+    {
+        GCSafeConcurrentJSLocker locker(exec->codeBlock()->m_lock, exec->vm().heap);
+        if (forceICFailure(exec))
+            return GiveUpOnCache;
         
-        RELEASE_ASSERT(result.code());
+        if (!base->structure()->propertyAccessesAreCacheable() || (!wasFound && !base->structure()->propertyAccessesAreCacheableForAbsence()))
+            return GiveUpOnCache;
+        
+        if (wasFound) {
+            if (!slot.isCacheable())
+                return GiveUpOnCache;
+        }
+        
+        CodeBlock* codeBlock = exec->codeBlock();
+        Structure* structure = base->structure(vm);
+        
+        std::unique_ptr<PolyProtoAccessChain> prototypeAccessChain;
+        ObjectPropertyConditionSet conditionSet;
+        if (wasFound) {
+            if (slot.slotBase() != base) {
+                bool usesPolyProto;
+                prototypeAccessChain = PolyProtoAccessChain::create(exec->lexicalGlobalObject(), base, slot, usesPolyProto);
+                if (!prototypeAccessChain) {
+                    // It's invalid to access this prototype property.
+                    return GiveUpOnCache;
+                }
+                if (!usesPolyProto) {
+                    prototypeAccessChain = nullptr;
+                    conditionSet = generateConditionsForPrototypePropertyHit(
+                        vm, codeBlock, exec, structure, slot.slotBase(), ident.impl());
+                }
+            }
+        } else {
+            bool usesPolyProto;
+            prototypeAccessChain = PolyProtoAccessChain::create(exec->lexicalGlobalObject(), base, slot, usesPolyProto);
+            if (!prototypeAccessChain) {
+                // It's invalid to access this prototype property.
+                return GiveUpOnCache;
+            }
 
-        MacroAssembler::repatchJump(
-            stubInfo.patchableJumpForIn(),
-            CodeLocationLabel(result.code()));
+            if (!usesPolyProto) {
+                prototypeAccessChain = nullptr;
+                conditionSet = generateConditionsForPropertyMiss(
+                    vm, codeBlock, exec, structure, ident.impl());
+            }
+        }
+        if (!conditionSet.isValid())
+            return GiveUpOnCache;
+
+        LOG_IC((ICEvent::InAddAccessCase, structure->classInfo(), ident));
+
+        std::unique_ptr<AccessCase> newCase = AccessCase::create(
+            vm, codeBlock, wasFound ? AccessCase::InHit : AccessCase::InMiss, invalidOffset, structure, conditionSet, WTFMove(prototypeAccessChain));
+
+        result = stubInfo.addAccessCase(locker, codeBlock, ident, WTFMove(newCase));
+
+        if (result.generatedSomeCode()) {
+            LOG_IC((ICEvent::InReplaceWithJump, structure->classInfo(), ident));
+            
+            RELEASE_ASSERT(result.code());
+
+            MacroAssembler::repatchJump(
+                stubInfo.patchableJumpForIn(),
+                CodeLocationLabel(result.code()));
+        }
     }
+
+    fireWatchpointsAndClearStubIfNeeded(vm, stubInfo, exec->codeBlock(), result);
     
     return result.shouldGiveUpNow() ? GiveUpOnCache : RetryCacheLater;
 }
@@ -546,7 +680,7 @@ void repatchIn(
     const PropertySlot& slot, StructureStubInfo& stubInfo)
 {
     SuperSamplerScope superSamplerScope(false);
-    if (tryRepatchIn(exec, base, ident, wasFound, slot, stubInfo) == GiveUpOnCache)
+    if (tryCacheIn(exec, base, ident, wasFound, slot, stubInfo) == GiveUpOnCache)
         ftlThunkAwareRepatchCall(exec->codeBlock(), stubInfo.slowPathCallLocation(), operationIn);
 }
 
@@ -567,25 +701,13 @@ static void linkSlowFor(VM* vm, CallLinkInfo& callLinkInfo)
     callLinkInfo.setSlowStub(createJITStubRoutine(virtualThunk, *vm, nullptr, true));
 }
 
-static bool isWebAssemblyToJSCallee(VM& vm, JSCell* callee)
-{
-#if ENABLE(WEBASSEMBLY)
-    // The WebAssembly -> JS stub sets it caller frame's callee to a singleton which lives on the VM.
-    return callee == vm.webAssemblyToJSCallee.get();
-#else
-    UNUSED_PARAM(vm);
-    UNUSED_PARAM(callee);
-    return false;
-#endif // ENABLE(WEBASSEMBLY)
-}
-
-static JSCell* webAssemblyOwner(VM& vm)
+static JSCell* webAssemblyOwner(JSCell* callee)
 {
 #if ENABLE(WEBASSEMBLY)
     // Each WebAssembly.Instance shares the stubs from their WebAssembly.Module, which are therefore the appropriate owner.
-    return vm.topJSWebAssemblyInstance->module();
+    return jsCast<WebAssemblyToJSCallee*>(callee)->module();
 #else
-    UNUSED_PARAM(vm);
+    UNUSED_PARAM(callee);
     RELEASE_ASSERT_NOT_REACHED();
     return nullptr;
 #endif // ENABLE(WEBASSEMBLY)
@@ -593,23 +715,28 @@ static JSCell* webAssemblyOwner(VM& vm)
 
 void linkFor(
     ExecState* exec, CallLinkInfo& callLinkInfo, CodeBlock* calleeCodeBlock,
-    JSFunction* callee, MacroAssemblerCodePtr codePtr)
+    JSObject* callee, MacroAssemblerCodePtr codePtr)
 {
     ASSERT(!callLinkInfo.stub());
 
     CallFrame* callerFrame = exec->callerFrame();
+    // Our caller must have a cell for a callee. When calling
+    // this from Wasm, we ensure the callee is a cell.
+    ASSERT(callerFrame->callee().isCell());
+
     VM& vm = callerFrame->vm();
     CodeBlock* callerCodeBlock = callerFrame->codeBlock();
 
     // WebAssembly -> JS stubs don't have a valid CodeBlock.
-    JSCell* owner = isWebAssemblyToJSCallee(vm, callerFrame->callee()) ? webAssemblyOwner(vm) : callerCodeBlock;
+    JSCell* owner = isWebAssemblyToJSCallee(callerFrame->callee().asCell()) ? webAssemblyOwner(callerFrame->callee().asCell()) : callerCodeBlock;
     ASSERT(owner);
 
     ASSERT(!callLinkInfo.isLinked());
     callLinkInfo.setCallee(vm, owner, callee);
     callLinkInfo.setLastSeenCallee(vm, owner, callee);
     if (shouldDumpDisassemblyFor(callerCodeBlock))
-        dataLog("Linking call in ", *callerCodeBlock, " at ", callLinkInfo.codeOrigin(), " to ", pointerDump(calleeCodeBlock), ", entrypoint at ", codePtr, "\n");
+        dataLog("Linking call in ", FullCodeOrigin(callerCodeBlock, callLinkInfo.codeOrigin()), " to ", pointerDump(calleeCodeBlock), ", entrypoint at ", codePtr, "\n");
+
     MacroAssembler::repatchNearCall(callLinkInfo.hotPathOther(), CodeLocationLabel(codePtr));
 
     if (calleeCodeBlock)
@@ -636,7 +763,8 @@ void linkDirectFor(
     ASSERT(!callLinkInfo.isLinked());
     callLinkInfo.setCodeBlock(*vm, callerCodeBlock, jsCast<FunctionCodeBlock*>(calleeCodeBlock));
     if (shouldDumpDisassemblyFor(callerCodeBlock))
-        dataLog("Linking call in ", *callerCodeBlock, " at ", callLinkInfo.codeOrigin(), " to ", pointerDump(calleeCodeBlock), ", entrypoint at ", codePtr, "\n");
+        dataLog("Linking call in ", FullCodeOrigin(callerCodeBlock, callLinkInfo.codeOrigin()), " to ", pointerDump(calleeCodeBlock), ", entrypoint at ", codePtr, "\n");
+
     if (callLinkInfo.callType() == CallLinkInfo::DirectTailCall)
         MacroAssembler::repatchJumpToNop(callLinkInfo.patchableJump());
     MacroAssembler::repatchNearCall(callLinkInfo.hotPathOther(), CodeLocationLabel(codePtr));
@@ -691,7 +819,7 @@ void linkVirtualFor(ExecState* exec, CallLinkInfo& callLinkInfo)
     CodeBlock* callerCodeBlock = callerFrame->codeBlock();
 
     if (shouldDumpDisassemblyFor(callerCodeBlock))
-        dataLog("Linking virtual call at ", *callerCodeBlock, " ", callerFrame->codeOrigin(), "\n");
+        dataLog("Linking virtual call at ", FullCodeOrigin(callerCodeBlock, callerFrame->codeOrigin()), "\n");
 
     MacroAssemblerCodeRef virtualThunk = virtualThunkFor(&vm, callLinkInfo);
     revertCall(&vm, callLinkInfo, virtualThunk);
@@ -710,26 +838,29 @@ void linkPolymorphicCall(
 {
     RELEASE_ASSERT(callLinkInfo.allowStubs());
     
-    // Currently we can't do anything for non-function callees.
-    // https://bugs.webkit.org/show_bug.cgi?id=140685
-    if (!newVariant || !newVariant.executable()) {
+    if (!newVariant) {
         linkVirtualFor(exec, callLinkInfo);
         return;
     }
 
     CallFrame* callerFrame = exec->callerFrame();
+
+    // Our caller must be have a cell for a callee. When calling
+    // this from Wasm, we ensure the callee is a cell.
+    ASSERT(callerFrame->callee().isCell());
+
     VM& vm = callerFrame->vm();
     CodeBlock* callerCodeBlock = callerFrame->codeBlock();
-    bool isWebAssembly = isWebAssemblyToJSCallee(vm, callerFrame->callee());
+    bool isWebAssembly = isWebAssemblyToJSCallee(callerFrame->callee().asCell());
 
     // WebAssembly -> JS stubs don't have a valid CodeBlock.
-    JSCell* owner = isWebAssembly ? webAssemblyOwner(vm) : callerCodeBlock;
+    JSCell* owner = isWebAssembly ? webAssemblyOwner(callerFrame->callee().asCell()) : callerCodeBlock;
     ASSERT(owner);
 
     CallVariantList list;
     if (PolymorphicCallStubRoutine* stub = callLinkInfo.stub())
         list = stub->variants();
-    else if (JSFunction* oldCallee = callLinkInfo.callee())
+    else if (JSObject* oldCallee = callLinkInfo.callee())
         list = CallVariantList{ CallVariant(oldCallee) };
     
     list = variantListWithVariant(list, newVariant);
@@ -753,10 +884,8 @@ void linkPolymorphicCall(
     
     // Figure out what our cases are.
     for (CallVariant variant : list) {
-        CodeBlock* codeBlock;
-        if (isWebAssembly || variant.executable()->isHostFunction())
-            codeBlock = nullptr;
-        else {
+        CodeBlock* codeBlock = nullptr;
+        if (variant.executable() && !variant.executable()->isHostFunction()) {
             ExecutableBase* executable = variant.executable();
             codeBlock = jsCast<FunctionExecutable*>(executable)->codeBlockForCall();
             // If we cannot handle a callee, either because we don't have a CodeBlock or because arity mismatch,
@@ -786,7 +915,7 @@ void linkPolymorphicCall(
     
     GPRReg calleeGPR = static_cast<GPRReg>(callLinkInfo.calleeGPR());
     
-    CCallHelpers stubJit(&vm, callerCodeBlock);
+    CCallHelpers stubJit(callerCodeBlock);
     
     CCallHelpers::JumpList slowPath;
     
@@ -816,7 +945,8 @@ void linkPolymorphicCall(
 #else
         // We would have already checked that the callee is a cell.
 #endif
-    
+
+        // FIXME: We could add a fast path for InternalFunction with closure call.
         slowPath.append(
             stubJit.branch8(
                 CCallHelpers::NotEqual,
@@ -826,6 +956,7 @@ void linkPolymorphicCall(
         stubJit.loadPtr(
             CCallHelpers::Address(calleeGPR, JSFunction::offsetOfExecutable()),
             scratchGPR);
+        stubJit.xorPtr(CCallHelpers::TrustedImmPtr(JSFunctionPoison::key()), scratchGPR);
         
         comparisonValueGPR = scratchGPR;
     } else
@@ -843,11 +974,19 @@ void linkPolymorphicCall(
             fastCounts[i] = 0;
         
         CallVariant variant = callCases[i].variant();
-        int64_t newCaseValue;
-        if (isClosureCall)
+        int64_t newCaseValue = 0;
+        if (isClosureCall) {
             newCaseValue = bitwise_cast<intptr_t>(variant.executable());
-        else
-            newCaseValue = bitwise_cast<intptr_t>(variant.function());
+            // FIXME: We could add a fast path for InternalFunction with closure call.
+            // https://bugs.webkit.org/show_bug.cgi?id=179311
+            if (!newCaseValue)
+                continue;
+        } else {
+            if (auto* function = variant.function())
+                newCaseValue = bitwise_cast<intptr_t>(function);
+            else
+                newCaseValue = bitwise_cast<intptr_t>(variant.internalFunction());
+        }
         
         if (!ASSERT_DISABLED) {
             for (size_t j = 0; j < i; ++j) {
@@ -886,9 +1025,14 @@ void linkPolymorphicCall(
         
         CallVariant variant = callCases[caseIndex].variant();
         
-        ASSERT(variant.executable()->hasJITCodeForCall());
-        MacroAssemblerCodePtr codePtr =
-            variant.executable()->generatedJITCodeForCall()->addressForCall(ArityCheckNotRequired);
+        MacroAssemblerCodePtr codePtr;
+        if (variant.executable()) {
+            ASSERT(variant.executable()->hasJITCodeForCall());
+            codePtr = variant.executable()->generatedJITCodeForCall()->addressForCall(ArityCheckNotRequired);
+        } else {
+            ASSERT(variant.internalFunction());
+            codePtr = vm.getCTIInternalFunctionTrampolineFor(CodeForCall);
+        }
         
         if (fastCounts) {
             stubJit.add32(
@@ -932,7 +1076,7 @@ void linkPolymorphicCall(
     stubJit.restoreReturnAddressBeforeReturn(GPRInfo::regT4);
     AssemblyHelpers::Jump slow = stubJit.jump();
         
-    LinkBuffer patchBuffer(vm, stubJit, owner, JITCompilationCanFail);
+    LinkBuffer patchBuffer(stubJit, owner, JITCompilationCanFail);
     if (patchBuffer.didFailToAllocate()) {
         linkVirtualFor(exec, callLinkInfo);
         return;
@@ -955,9 +1099,9 @@ void linkPolymorphicCall(
     auto stubRoutine = adoptRef(*new PolymorphicCallStubRoutine(
         FINALIZE_CODE_FOR(
             callerCodeBlock, patchBuffer,
-            ("Polymorphic call stub for %s, return point %p, targets %s",
+            "Polymorphic call stub for %s, return point %p, targets %s",
                 isWebAssembly ? "WebAssembly" : toCString(*callerCodeBlock).data(), callLinkInfo.callReturnLocation().labelAtOffset(0).executableAddress(),
-                toCString(listDump(callCases)).data())),
+                toCString(listDump(callCases)).data()),
         vm, owner, exec->callerFrame(), callLinkInfo, callCases,
         WTFMove(fastCounts)));
     
@@ -982,7 +1126,7 @@ void linkPolymorphicCall(
 void resetGetByID(CodeBlock* codeBlock, StructureStubInfo& stubInfo, GetByIDKind kind)
 {
     ftlThunkAwareRepatchCall(codeBlock, stubInfo.slowPathCallLocation(), appropriateOptimizingGetByIdFunction(kind));
-    InlineAccess::rewireStubAsJump(*codeBlock->vm(), stubInfo, stubInfo.slowPathStartLocation());
+    InlineAccess::rewireStubAsJump(stubInfo, stubInfo.slowPathStartLocation());
 }
 
 void resetPutByID(CodeBlock* codeBlock, StructureStubInfo& stubInfo)
@@ -1001,7 +1145,7 @@ void resetPutByID(CodeBlock* codeBlock, StructureStubInfo& stubInfo)
     }
 
     ftlThunkAwareRepatchCall(codeBlock, stubInfo.slowPathCallLocation(), optimizedFunction);
-    InlineAccess::rewireStubAsJump(*codeBlock->vm(), stubInfo, stubInfo.slowPathStartLocation());
+    InlineAccess::rewireStubAsJump(stubInfo, stubInfo.slowPathStartLocation());
 }
 
 void resetIn(CodeBlock*, StructureStubInfo& stubInfo)

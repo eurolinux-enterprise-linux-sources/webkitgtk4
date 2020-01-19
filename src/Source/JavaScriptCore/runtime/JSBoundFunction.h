@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -41,13 +41,20 @@ public:
     typedef JSFunction Base;
     const static unsigned StructureFlags = ~ImplementsDefaultHasInstance & Base::StructureFlags;
 
+    template<typename CellType>
+    static IsoSubspace* subspaceFor(VM& vm)
+    {
+        return &vm.boundFunctionSpace;
+    }
+
     static JSBoundFunction* create(VM&, ExecState*, JSGlobalObject*, JSObject* targetFunction, JSValue boundThis, JSArray* boundArgs, int, const String& name);
     
     static bool customHasInstance(JSObject*, ExecState*, JSValue);
 
     JSObject* targetFunction() { return m_targetFunction.get(); }
     JSValue boundThis() { return m_boundThis.get(); }
-    JSArray* boundArgs() { return m_boundArgs.get(); }
+    JSArray* boundArgs() { return m_boundArgs.get(); } // DO NOT allow this array to be mutated!
+    JSArray* boundArgsCopy(ExecState*);
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
     {
@@ -68,6 +75,8 @@ private:
     
     void finishCreation(VM&, NativeExecutable*, int length);
 
+    // FIXME: Consider poisoning these pointers.
+    // https://bugs.webkit.org/show_bug.cgi?id=182713
     WriteBarrier<JSObject> m_targetFunction;
     WriteBarrier<Unknown> m_boundThis;
     WriteBarrier<JSArray> m_boundArgs;

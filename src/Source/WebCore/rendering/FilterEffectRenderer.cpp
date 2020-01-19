@@ -75,9 +75,7 @@ Ref<FilterEffectRenderer> FilterEffectRenderer::create()
     return adoptRef(*new FilterEffectRenderer);
 }
 
-FilterEffectRenderer::~FilterEffectRenderer()
-{
-}
+FilterEffectRenderer::~FilterEffectRenderer() = default;
 
 GraphicsContext* FilterEffectRenderer::inputContext()
 {
@@ -142,7 +140,7 @@ bool FilterEffectRenderer::build(RenderElement& renderer, const FilterOperations
         case FilterOperation::REFERENCE: {
             auto& referenceOperation = downcast<ReferenceFilterOperation>(filterOperation);
             effect = buildReferenceFilter(renderer, *previousEffect, referenceOperation);
-            referenceOperation.setFilterEffect(effect);
+            referenceOperation.setFilterEffect(effect.copyRef());
             break;
         }
         case FilterOperation::GRAYSCALE: {
@@ -365,7 +363,7 @@ LayoutRect FilterEffectRenderer::computeSourceImageRectForDirtyRect(const Layout
 
 ImageBuffer* FilterEffectRenderer::output() const
 {
-    return m_effects.last()->asImageBuffer();
+    return m_effects.last()->imageBufferResult();
 }
 
 void FilterEffectRenderer::setMaxEffectRects(const FloatRect& effectRect)
@@ -439,7 +437,7 @@ bool FilterEffectRendererHelper::beginFilterEffect()
 
     // Translate the context so that the contents of the layer is captured in the offscreen memory buffer.
     sourceGraphicsContext->save();
-    sourceGraphicsContext->translate(-m_paintOffset.x(), -m_paintOffset.y());
+    sourceGraphicsContext->translate(-m_paintOffset);
     sourceGraphicsContext->clearRect(m_repaintRect);
     sourceGraphicsContext->clip(m_repaintRect);
 

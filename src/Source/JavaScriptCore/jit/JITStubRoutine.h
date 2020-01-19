@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012, 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,6 +33,7 @@
 namespace JSC {
 
 class JITStubRoutineSet;
+class VM;
 
 // This is a base-class for JIT stub routines, and also the class you want
 // to instantiate directly if you have a routine that does not need any
@@ -95,30 +96,9 @@ public:
     uintptr_t endAddress() const { return m_code.executableMemory()->endAsInteger(); }
     static uintptr_t addressStep() { return jitAllocationGranule; }
     
-    static bool canPerformRangeFilter()
-    {
-        return true;
-    }
-    static uintptr_t filteringStartAddress()
-    {
-        return startOfFixedExecutableMemoryPool;
-    }
-    static size_t filteringExtentSize()
-    {
-        return fixedExecutableMemoryPoolSize;
-    }
     static bool passesFilter(uintptr_t address)
     {
-        if (!canPerformRangeFilter()) {
-            // Just check that the address doesn't use any special values that would make
-            // our hashtables upset.
-            return address >= jitAllocationGranule && address != std::numeric_limits<uintptr_t>::max();
-        }
-        
-        if (address - filteringStartAddress() >= filteringExtentSize())
-            return false;
-        
-        return true;
+        return isJITPC(bitwise_cast<void*>(address));
     }
     
     // Return true if you are still valid after. Return false if you are now invalid. If you return
@@ -134,8 +114,8 @@ protected:
 };
 
 // Helper for the creation of simple stub routines that need no help from the GC.
-#define FINALIZE_CODE_FOR_STUB(codeBlock, patchBuffer, dataLogFArguments) \
-    (adoptRef(new JITStubRoutine(FINALIZE_CODE_FOR((codeBlock), (patchBuffer), dataLogFArguments))))
+#define FINALIZE_CODE_FOR_STUB(codeBlock, patchBuffer, ...) \
+    (adoptRef(new JITStubRoutine(FINALIZE_CODE_FOR((codeBlock), (patchBuffer), __VA_ARGS__))))
 
 } // namespace JSC
 

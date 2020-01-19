@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,7 +38,7 @@
 
 namespace JSC {
 
-const ClassInfo WebAssemblyTableConstructor::s_info = { "Function", &Base::s_info, &constructorTableWebAssemblyTable, CREATE_METHOD_TABLE(WebAssemblyTableConstructor) };
+const ClassInfo WebAssemblyTableConstructor::s_info = { "Function", &Base::s_info, &constructorTableWebAssemblyTable, nullptr, CREATE_METHOD_TABLE(WebAssemblyTableConstructor) };
 
 /* Source for WebAssemblyTableConstructor.lut.h
  @begin constructorTableWebAssemblyTable
@@ -90,15 +90,22 @@ static EncodedJSValue JSC_HOST_CALL constructJSWebAssemblyTable(ExecState* exec)
         }
     }
 
+    RefPtr<Wasm::Table> wasmTable = Wasm::Table::create(initial, maximum);
+    if (!wasmTable) {
+        return JSValue::encode(throwException(exec, throwScope,
+            createRangeError(exec, ASCIILiteral("couldn't create Table"))));
+    }
+
     throwScope.release();
-    return JSValue::encode(JSWebAssemblyTable::create(exec, vm, exec->lexicalGlobalObject()->WebAssemblyTableStructure(), initial, maximum));
+
+    return JSValue::encode(JSWebAssemblyTable::create(exec, vm, exec->lexicalGlobalObject()->WebAssemblyTableStructure(), wasmTable.releaseNonNull()));
 }
 
-static EncodedJSValue JSC_HOST_CALL callJSWebAssemblyTable(ExecState* state)
+static EncodedJSValue JSC_HOST_CALL callJSWebAssemblyTable(ExecState* exec)
 {
-    VM& vm = state->vm();
+    VM& vm = exec->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
-    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(state, scope, "WebAssembly.Table"));
+    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(exec, scope, "WebAssembly.Table"));
 }
 
 WebAssemblyTableConstructor* WebAssemblyTableConstructor::create(VM& vm, Structure* structure, WebAssemblyTablePrototype* thisPrototype)
@@ -110,38 +117,19 @@ WebAssemblyTableConstructor* WebAssemblyTableConstructor::create(VM& vm, Structu
 
 Structure* WebAssemblyTableConstructor::createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
 {
-    return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
+    return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info());
 }
 
 void WebAssemblyTableConstructor::finishCreation(VM& vm, WebAssemblyTablePrototype* prototype)
 {
     Base::finishCreation(vm, ASCIILiteral("Table"));
-    putDirectWithoutTransition(vm, vm.propertyNames->prototype, prototype, DontEnum | DontDelete | ReadOnly);
-    putDirectWithoutTransition(vm, vm.propertyNames->length, jsNumber(1), ReadOnly | DontEnum | DontDelete);
+    putDirectWithoutTransition(vm, vm.propertyNames->prototype, prototype, PropertyAttribute::DontEnum | PropertyAttribute::DontDelete | PropertyAttribute::ReadOnly);
+    putDirectWithoutTransition(vm, vm.propertyNames->length, jsNumber(1), PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum | PropertyAttribute::DontDelete);
 }
 
 WebAssemblyTableConstructor::WebAssemblyTableConstructor(VM& vm, Structure* structure)
-    : Base(vm, structure)
+    : Base(vm, structure, callJSWebAssemblyTable, constructJSWebAssemblyTable)
 {
-}
-
-ConstructType WebAssemblyTableConstructor::getConstructData(JSCell*, ConstructData& constructData)
-{
-    constructData.native.function = constructJSWebAssemblyTable;
-    return ConstructType::Host;
-}
-
-CallType WebAssemblyTableConstructor::getCallData(JSCell*, CallData& callData)
-{
-    callData.native.function = callJSWebAssemblyTable;
-    return CallType::Host;
-}
-
-void WebAssemblyTableConstructor::visitChildren(JSCell* cell, SlotVisitor& visitor)
-{
-    auto* thisObject = jsCast<WebAssemblyTableConstructor*>(cell);
-    ASSERT_GC_OBJECT_INHERITS(thisObject, info());
-    Base::visitChildren(thisObject, visitor);
 }
 
 } // namespace JSC

@@ -32,6 +32,10 @@
 struct wl_egl_window;
 #endif
 
+#if PLATFORM(WPE)
+struct wpe_renderer_backend_egl_offscreen_target;
+#endif
+
 typedef void *EGLConfig;
 typedef void *EGLContext;
 typedef void *EGLDisplay;
@@ -44,6 +48,9 @@ class GLContextEGL final : public GLContext {
 public:
     static std::unique_ptr<GLContextEGL> createContext(GLNativeWindowType, PlatformDisplay&);
     static std::unique_ptr<GLContextEGL> createSharingContext(PlatformDisplay&);
+
+    static const char* errorString(int statusCode);
+    static const char* lastErrorString();
 
     virtual ~GLContextEGL();
 
@@ -73,6 +80,10 @@ private:
     GLContextEGL(PlatformDisplay&, EGLContext, EGLSurface, WlUniquePtr<struct wl_surface>&&, struct wl_egl_window*);
     void destroyWaylandWindow();
 #endif
+#if PLATFORM(WPE)
+    GLContextEGL(PlatformDisplay&, EGLContext, EGLSurface, struct wpe_renderer_backend_egl_offscreen_target*);
+    void destroyWPETarget();
+#endif
 
     static std::unique_ptr<GLContextEGL> createWindowContext(GLNativeWindowType, PlatformDisplay&, EGLContext sharingContext = nullptr);
     static std::unique_ptr<GLContextEGL> createPbufferContext(PlatformDisplay&, EGLContext sharingContext = nullptr);
@@ -84,6 +95,10 @@ private:
 #if PLATFORM(WAYLAND)
     static std::unique_ptr<GLContextEGL> createWaylandContext(PlatformDisplay&, EGLContext sharingContext = nullptr);
     static EGLSurface createWindowSurfaceWayland(EGLDisplay, EGLConfig, GLNativeWindowType);
+#endif
+#if PLATFORM(WPE)
+    static std::unique_ptr<GLContextEGL> createWPEContext(PlatformDisplay&, EGLContext sharingContext = nullptr);
+    static EGLSurface createWindowSurfaceWPE(EGLDisplay, EGLConfig, GLNativeWindowType);
 #endif
 
     static bool getEGLConfig(EGLDisplay, EGLConfig*, EGLSurfaceType);
@@ -97,6 +112,9 @@ private:
 #if PLATFORM(WAYLAND)
     WlUniquePtr<struct wl_surface> m_wlSurface;
     struct wl_egl_window* m_wlWindow { nullptr };
+#endif
+#if PLATFORM(WPE)
+    struct wpe_renderer_backend_egl_offscreen_target* m_wpeTarget { nullptr };
 #endif
 #if USE(CAIRO)
     cairo_device_t* m_cairoDevice { nullptr };

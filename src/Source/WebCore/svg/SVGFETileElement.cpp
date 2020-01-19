@@ -21,6 +21,7 @@
 #include "config.h"
 #include "SVGFETileElement.h"
 
+#include "FETile.h"
 #include "FilterEffect.h"
 #include "SVGFilterBuilder.h"
 #include "SVGNames.h"
@@ -71,7 +72,7 @@ void SVGFETileElement::svgAttributeChanged(const QualifiedName& attrName)
 
 RefPtr<FilterEffect> SVGFETileElement::build(SVGFilterBuilder* filterBuilder, Filter& filter)
 {
-    FilterEffect* input1 = filterBuilder->getEffectById(in1());
+    auto input1 = filterBuilder->getEffectById(in1());
 
     if (!input1)
         return nullptr;
