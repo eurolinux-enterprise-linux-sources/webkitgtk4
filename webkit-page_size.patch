@@ -1,17 +1,11 @@
-diff --git a/Source/JavaScriptCore/heap/MarkedBlock.h b/Source/JavaScriptCore/heap/MarkedBlock.h
-index 7d14eecfd8d..95ea41c04dd 100644
---- a/Source/JavaScriptCore/heap/MarkedBlock.h
-+++ b/Source/JavaScriptCore/heap/MarkedBlock.h
-@@ -66,7 +66,12 @@ private:
-     friend class Handle;
- public:
+--- webkitgtk-2.22.5/Source/JavaScriptCore/heap/MarkedBlock.h.page_size	2019-01-22 13:18:54.824120623 +0100
++++ webkitgtk-2.22.5/Source/JavaScriptCore/heap/MarkedBlock.h	2019-01-22 13:33:32.748555690 +0100
+@@ -68,7 +68,7 @@ public:
      static constexpr size_t atomSize = 16; // bytes
-+
-+#if CPU(PPC64) || CPU(PPC64LE) || CPU(PPC) || CPU(ARM64) || CPU(UNKNOWN)
-+    static constexpr size_t blockSize = 64 * KB;
-+#else
-     static constexpr size_t blockSize = 16 * KB;
-+#endif
-     static constexpr size_t blockMask = ~(blockSize - 1); // blockSize must be a power of two.
  
-     static constexpr size_t atomsPerBlock = blockSize / atomSize;
+     // Block size must be at least as large as the system page size.
+-#if CPU(PPC64) || CPU(PPC64LE) || CPU(PPC) || CPU(UNKNOWN)
++#if CPU(PPC64) || CPU(PPC64LE) || CPU(PPC) || CPU(ARM64) || CPU(UNKNOWN)
+     static constexpr size_t blockSize = 64 * KB;
+ #else
+     static constexpr size_t blockSize = 16 * KB;

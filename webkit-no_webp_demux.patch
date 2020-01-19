@@ -1,6 +1,5 @@
-diff -up webkitgtk-2.20.2/Source/cmake/FindWebP.cmake.no_webp_demux webkitgtk-2.20.2/Source/cmake/FindWebP.cmake
---- webkitgtk-2.20.2/Source/cmake/FindWebP.cmake.no_webp_demux	2018-02-19 08:45:33.000000000 +0100
-+++ webkitgtk-2.20.2/Source/cmake/FindWebP.cmake	2018-05-11 08:36:41.026235222 +0200
+--- webkitgtk-2.22.5/Source/cmake/FindWebP.cmake.no_webp_demux	2019-01-22 13:38:34.224690921 +0100
++++ webkitgtk-2.22.5/Source/cmake/FindWebP.cmake	2019-01-22 14:21:18.442548284 +0100
 @@ -33,34 +33,20 @@ find_package(PkgConfig)
  pkg_check_modules(PC_WEBP QUIET libwebp)
  
@@ -21,7 +20,6 @@ diff -up webkitgtk-2.20.2/Source/cmake/FindWebP.cmake.no_webp_demux webkitgtk-2.
      HINTS ${PC_WEBP_LIBDIR} ${PC_WEBP_LIBRARY_DIRS}
  )
 -list(APPEND WEBP_LIBRARIES ${WEBP_LIBRARY})
- mark_as_advanced(WEBP_LIBRARIES)
  
 -find_path(WEBP_DEMUX_INCLUDE_DIR
 -    NAMES webp/demux.h
@@ -35,12 +33,13 @@ diff -up webkitgtk-2.20.2/Source/cmake/FindWebP.cmake.no_webp_demux webkitgtk-2.
 -)
 -list(APPEND WEBP_LIBRARIES ${WEBP_DEMUX_LIBRARY})
 -
+-mark_as_advanced(WEBP_DEMUX_INCLUDE_DIR WEBP_DEMUX_LIBRARY WEBP_INCLUDE_DIR WEBP_LIBRARY WEBP_LIBRARIES)
++mark_as_advanced(WEBP_LIBRARIES)
+ 
  include(FindPackageHandleStandardArgs)
  find_package_handle_standard_args(WebP REQUIRED_VARS WEBP_INCLUDE_DIRS WEBP_LIBRARIES
-                                   FOUND_VAR WEBP_FOUND)
-diff -up webkitgtk-2.20.2/Source/WebCore/platform/graphics/ImageBackingStore.h.no_webp_demux webkitgtk-2.20.2/Source/WebCore/platform/graphics/ImageBackingStore.h
---- webkitgtk-2.20.2/Source/WebCore/platform/graphics/ImageBackingStore.h.no_webp_demux	2018-02-19 08:45:32.000000000 +0100
-+++ webkitgtk-2.20.2/Source/WebCore/platform/graphics/ImageBackingStore.h	2018-05-11 08:36:41.027235218 +0200
+--- webkitgtk-2.22.5/Source/WebCore/platform/graphics/ImageBackingStore.h.no_webp_demux	2017-11-30 11:23:29.000000000 +0100
++++ webkitgtk-2.22.5/Source/WebCore/platform/graphics/ImageBackingStore.h	2019-01-22 13:38:34.224690921 +0100
 @@ -147,6 +147,7 @@ public:
          setPixel(pixelAt(x, y), r, g, b, a);
      }
@@ -57,10 +56,9 @@ diff -up webkitgtk-2.20.2/Source/WebCore/platform/graphics/ImageBackingStore.h.n
  
      static bool isOverSize(const IntSize& size)
      {
-diff -up webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.cpp.no_webp_demux webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.cpp
---- webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.cpp.no_webp_demux	2018-02-19 08:45:32.000000000 +0100
-+++ webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.cpp	2018-05-11 09:19:25.756550925 +0200
-@@ -31,49 +31,47 @@
+--- webkitgtk-2.22.5/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.cpp.no_webp_demux	2019-01-22 13:38:34.225690919 +0100
++++ webkitgtk-2.22.5/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.cpp	2019-01-22 14:48:11.041983180 +0100
+@@ -32,49 +32,47 @@
  
  #if USE(WEBP)
  
@@ -122,7 +120,7 @@ diff -up webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageD
 +    m_decoder = 0;
  }
  
- ImageFrame* WEBPImageDecoder::frameBufferAtIndex(size_t index)
+ ScalableImageDecoderFrame* WEBPImageDecoder::frameBufferAtIndex(size_t index)
  {
 -    if (index >= frameCount())
 +    if (index)
@@ -134,7 +132,7 @@ diff -up webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageD
      // The size of m_frameBufferCache may be smaller than the index requested. This can happen
      // because new data may have arrived with a bigger frameCount, but decode() hasn't been called
      // yet, which is the one that resizes the cache.
-@@ -85,275 +83,73 @@ ImageFrame* WEBPImageDecoder::frameBuffe
+@@ -86,275 +84,73 @@ ScalableImageDecoderFrame* WEBPImageDeco
      return &m_frameBufferCache[index];
  }
  
@@ -169,7 +167,7 @@ diff -up webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageD
 -        // This frame covers the whole area and its disposalMethod is RestoreToBackground, which means
 -        // that the next frame will be rendered on top of a transparent background, and can be decoded
 -        // without dependencies. This can only be checked for frames prior to frameIndex.
--        if (firstIndependentFrame < frameIndex && m_frameBufferCache[firstIndependentFrame].disposalMethod() == ImageFrame::DisposalMethod::RestoreToBackground)
+-        if (firstIndependentFrame < frameIndex && m_frameBufferCache[firstIndependentFrame].disposalMethod() == ScalableImageDecoderFrame::DisposalMethod::RestoreToBackground)
 -            return firstIndependentFrame + 1;
 -    }
 -
@@ -251,11 +249,11 @@ diff -up webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageD
 -    bool blend = webpFrame.blend_method == WEBP_MUX_BLEND ? true : false;
 -
 -    ASSERT(m_frameBufferCache.size() > frameIndex);
--    ImageFrame& buffer = m_frameBufferCache[frameIndex];
+-    auto& buffer = m_frameBufferCache[frameIndex];
 -    buffer.setDuration(Seconds::fromMilliseconds(webpFrame.duration));
--    buffer.setDisposalMethod(webpFrame.dispose_method == WEBP_MUX_DISPOSE_BACKGROUND ? ImageFrame::DisposalMethod::RestoreToBackground : ImageFrame::DisposalMethod::DoNotDispose);
+-    buffer.setDisposalMethod(webpFrame.dispose_method == WEBP_MUX_DISPOSE_BACKGROUND ? ScalableImageDecoderFrame::DisposalMethod::RestoreToBackground : ScalableImageDecoderFrame::DisposalMethod::DoNotDispose);
 +    ASSERT(!m_frameBufferCache.isEmpty());
-+    ImageFrame& buffer = m_frameBufferCache[0];
++    auto& buffer = m_frameBufferCache[0];
      ASSERT(!buffer.isComplete());
  
 -    if (buffer.isInvalid() && !initFrameBuffer(frameIndex, &webpFrame)) {
@@ -266,10 +264,10 @@ diff -up webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageD
 -    WebPDecBuffer decoderBuffer;
 -    WebPInitDecBuffer(&decoderBuffer);
 -    decoderBuffer.colorspace = MODE_RGBA;
--    decoderBuffer.u.RGBA.stride = webpFrame.width * sizeof(RGBA32);
+-    decoderBuffer.u.RGBA.stride = webpFrame.width * sizeof(uint32_t);
 -    decoderBuffer.u.RGBA.size = decoderBuffer.u.RGBA.stride * webpFrame.height;
 -    decoderBuffer.is_external_memory = 1;
--    std::unique_ptr<unsigned char[]> p(new uint8_t[decoderBuffer.u.RGBA.size]());
+-    auto p = makeUniqueArray<uint8_t>(decoderBuffer.u.RGBA.size);
 -    decoderBuffer.u.RGBA.rgba = p.get();
 -    if (!decoderBuffer.u.RGBA.rgba) {
 -        setFailed();
@@ -326,7 +324,7 @@ diff -up webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageD
 -    if (frameIndex >= frameCount())
          return false;
 -
--    ImageFrame& buffer = m_frameBufferCache[frameIndex];
+-    auto& buffer = m_frameBufferCache[frameIndex];
 -
 -    // Initialize the frame rect in our buffer.
 -    IntRect frameRect(webpFrame->x_offset, webpFrame->y_offset, webpFrame->width, webpFrame->height);
@@ -339,14 +337,14 @@ diff -up webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageD
 -        if (!buffer.initialize(size(), m_premultiplyAlpha))
 -            return false;
 -    } else {
--        const ImageFrame& prevBuffer = m_frameBufferCache[frameIndex - 1];
+-        const auto& prevBuffer = m_frameBufferCache[frameIndex - 1];
 -        ASSERT(prevBuffer.isComplete());
 -
 -        // Preserve the last frame as the starting state for this frame.
 -        if (!prevBuffer.backingStore() || !buffer.initialize(*prevBuffer.backingStore()))
 -            return false;
 -
--        if (prevBuffer.disposalMethod() == ImageFrame::DisposalMethod::RestoreToBackground) {
+-        if (prevBuffer.disposalMethod() == ScalableImageDecoderFrame::DisposalMethod::RestoreToBackground) {
 -            // We want to clear the previous frame to transparent, without
 -            // affecting pixels in the image outside of the frame.
 -            const IntRect& prevRect = prevBuffer.backingStore()->frameRect();
@@ -362,7 +360,7 @@ diff -up webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageD
 -
 -void WEBPImageDecoder::applyPostProcessing(size_t frameIndex, WebPIDecoder* decoder, WebPDecBuffer& decoderBuffer, bool blend)
 -{
--    ImageFrame& buffer = m_frameBufferCache[frameIndex];
+-    auto& buffer = m_frameBufferCache[frameIndex];
 -    int decodedWidth = 0;
 -    int decodedHeight = 0;
 -    if (!WebPIDecGetRGB(decoder, &decodedHeight, &decodedWidth, 0, 0))
@@ -380,8 +378,8 @@ diff -up webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageD
 -        const int canvasY = top + y;
 -        for (int x = 0; x < decodedWidth; x++) {
 -            const int canvasX = left + x;
--            RGBA32* address = buffer.backingStore()->pixelAt(canvasX, canvasY);
--            uint8_t* pixel = decoderBuffer.u.RGBA.rgba + (y * frameRect.width() + x) * sizeof(RGBA32);
+-            auto* address = buffer.backingStore()->pixelAt(canvasX, canvasY);
+-            uint8_t* pixel = decoderBuffer.u.RGBA.rgba + (y * frameRect.width() + x) * sizeof(uint32_t);
 -            if (blend && (pixel[3] < 255))
 -                buffer.backingStore()->blendPixel(address, pixel[0], pixel[1], pixel[2], pixel[3]);
 -            else
@@ -455,7 +453,7 @@ diff -up webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageD
 -    // In WEBP every frame depends on the previous one or none. That means that frames after clearBeforeFrame
 -    // won't need any frame before them to render, so we can clear them all.
 -    for (int i = clearBeforeFrame - 1; i >= 0; i--) {
--        ImageFrame& buffer = m_frameBufferCache[i];
+-        auto& buffer = m_frameBufferCache[i];
 -        if (!buffer.isInvalid())
 -            buffer.clear();
 +    default:
@@ -464,9 +462,8 @@ diff -up webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageD
      }
  }
  
-diff -up webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.h.no_webp_demux webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.h
---- webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.h.no_webp_demux	2018-02-19 08:45:32.000000000 +0100
-+++ webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.h	2018-05-11 08:36:41.029235210 +0200
+--- webkitgtk-2.22.5/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.h.no_webp_demux	2018-07-25 13:56:31.000000000 +0200
++++ webkitgtk-2.22.5/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.h	2019-01-22 14:11:28.656237722 +0100
 @@ -33,7 +33,6 @@
  #if USE(WEBP)
  
@@ -475,12 +472,12 @@ diff -up webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageD
  
  namespace WebCore {
  
-@@ -47,26 +46,19 @@ public:
+@@ -47,26 +46,18 @@ public:
      virtual ~WEBPImageDecoder();
  
-     String filenameExtension() const override { return ASCIILiteral("webp"); }
+     String filenameExtension() const override { return "webp"_s; }
 -    void setData(SharedBuffer&, bool) final;
-     ImageFrame* frameBufferAtIndex(size_t index) override;
+     ScalableImageDecoderFrame* frameBufferAtIndex(size_t index) override;
 -    RepetitionCount repetitionCount() const override;
 -    size_t frameCount() const override { return m_frameCount; }
 -    void clearFrameBufferCache(size_t) override;
@@ -506,7 +503,6 @@ diff -up webkitgtk-2.20.2/Source/WebCore/platform/image-decoders/webp/WEBPImageD
 +    WebPIDecoder* m_decoder;
 +    bool m_hasAlpha;
 +
-+    void applyColorProfile(const uint8_t*, size_t, ImageFrame&) { };
 +    void clear();
  };
  
