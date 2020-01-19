@@ -1,0 +1,1172 @@
+From 032df66e235e2f87d6882fda269843f9fa83b8cf Mon Sep 17 00:00:00 2001
+From: "commit-queue@webkit.org"
+ <commit-queue@webkit.org@268f45cc-cd09-0410-ab3c-d52691b4dbfc>
+Date: Fri, 6 Oct 2017 06:32:57 +0000
+Subject: [PATCH] Update Source/ThirdParty/woff2 to
+ 22c256bc457777744ba14b7325a6e8e0e7dec91c
+ https://bugs.webkit.org/show_bug.cgi?id=177994
+
+Patch by Frederic Wang <fwang@igalia.com> on 2017-10-05
+Reviewed by Michael Catanzaro.
+
+Source/ThirdParty:
+
+* woff2/CMakeLists.txt: Also consider the directory for public headers.
+* woff2/README.webkit:
+* woff2/include/woff2/decode.h: Renamed from Source/ThirdParty/woff2/src/woff2_dec.h.
+* woff2/include/woff2/encode.h: Renamed from Source/ThirdParty/woff2/src/woff2_enc.h.
+(woff2::WOFF2Params::WOFF2Params):
+* woff2/include/woff2/output.h: Renamed from Source/ThirdParty/woff2/src/woff2_out.h.
+(woff2::WOFF2Out::~WOFF2Out):
+(woff2::WOFF2StringOut::MaxSize):
+* woff2/src/buffer.h:
+* woff2/src/convert_woff2ttf_*.cc:
+* woff2/src/file.h:
+* woff2/src/font.cc:
+* woff2/src/font.h:
+* woff2/src/glyph.cc:
+* woff2/src/glyph.h:
+* woff2/src/normalize.cc:
+* woff2/src/normalize.h:
+* woff2/src/port.h:
+* woff2/src/round.h:
+* woff2/src/store_bytes.h:
+* woff2/src/table_tags.cc:
+* woff2/src/table_tags.h:
+* woff2/src/transform.cc:
+* woff2/src/transform.h:
+* woff2/src/variable_length.cc:
+* woff2/src/variable_length.h:
+* woff2/src/woff2_common.cc:
+* woff2/src/woff2_common.h:
+* woff2/src/woff2_compress.cc:
+* woff2/src/woff2_dec.cc:
+* woff2/src/woff2_decompress.cc:
+* woff2/src/woff2_enc.cc:
+* woff2/src/woff2_info.cc:
+* woff2/src/woff2_out.cc:
+* woff2/update.sh: Also consider directory for public headers.
+
+Source/WebCore:
+
+No new tests, already covered by existing tests.
+
+* CMakeLists.txt: Include the directory for public headers instead.
+* platform/graphics/WOFFFileFormat.cpp: Use the public header
+woff2/decode.h and do not use the "wOF2" constant from private headers.
+(WebCore::isWOFF):
+(WebCore::convertWOFFToSfnt):
+
+git-svn-id: http://svn.webkit.org/repository/webkit/trunk@222960 268f45cc-cd09-0410-ab3c-d52691b4dbfc
+
+diff --git a/Source/ThirdParty/woff2/CMakeLists.txt b/Source/ThirdParty/woff2/CMakeLists.txt
+index 3e5a48f3874..e1f4582db72 100644
+--- a/Source/ThirdParty/woff2/CMakeLists.txt
++++ b/Source/ThirdParty/woff2/CMakeLists.txt
+@@ -1,6 +1,7 @@
+ set(WOFF2_DIR "${THIRDPARTY_DIR}/woff2")
+ 
+ set(WOFF2_INCLUDE_DIRECTORIES
++  "${WOFF2_DIR}/include"
+   "${WOFF2_DIR}/src"
+ )
+ 
+diff --git a/Source/ThirdParty/woff2/README.webkit b/Source/ThirdParty/woff2/README.webkit
+index 1fc0fad4c94..28b9adbac1d 100644
+--- a/Source/ThirdParty/woff2/README.webkit
++++ b/Source/ThirdParty/woff2/README.webkit
+@@ -11,4 +11,4 @@ The in-tree copy is updated by running
+   sh update.sh
+ from within the modules/woff2 directory.
+ 
+-Current version: [commit aa283a500aeb655834d77f3cf9cf1b093b0b4389].
++Current version: [commit 22c256bc457777744ba14b7325a6e8e0e7dec91c].
+diff --git a/Source/ThirdParty/woff2/src/woff2_dec.h b/Source/ThirdParty/woff2/include/woff2/decode.h
+similarity index 56%
+rename from Source/ThirdParty/woff2/src/woff2_dec.h
+rename to Source/ThirdParty/woff2/include/woff2/decode.h
+index b889812fbc2..6ef3b8e76c8 100644
+--- a/Source/ThirdParty/woff2/src/woff2_dec.h
++++ b/Source/ThirdParty/woff2/include/woff2/decode.h
+@@ -1,25 +1,17 @@
+-// Copyright 2014 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Library for converting WOFF2 format font files to their TTF versions.
++/* Copyright 2014 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Library for converting WOFF2 format font files to their TTF versions. */
+ 
+ #ifndef WOFF2_WOFF2_DEC_H_
+ #define WOFF2_WOFF2_DEC_H_
+ 
+ #include <stddef.h>
+ #include <inttypes.h>
+-#include "./woff2_out.h"
++#include <woff2/output.h>
+ 
+ namespace woff2 {
+ 
+diff --git a/Source/ThirdParty/woff2/src/woff2_enc.h b/Source/ThirdParty/woff2/include/woff2/encode.h
+similarity index 57%
+rename from Source/ThirdParty/woff2/src/woff2_enc.h
+rename to Source/ThirdParty/woff2/include/woff2/encode.h
+index 3ac8c3ab1bd..34b77229749 100644
+--- a/Source/ThirdParty/woff2/src/woff2_enc.h
++++ b/Source/ThirdParty/woff2/include/woff2/encode.h
+@@ -1,18 +1,10 @@
+-// Copyright 2014 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Library for converting WOFF2 format font files to their TTF versions.
++/* Copyright 2014 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Library for converting WOFF2 format font files to their TTF versions. */
+ 
+ #ifndef WOFF2_WOFF2_ENC_H_
+ #define WOFF2_WOFF2_ENC_H_
+@@ -21,16 +13,13 @@
+ #include <inttypes.h>
+ #include <string>
+ 
+-using std::string;
+-
+-
+ namespace woff2 {
+ 
+ struct WOFF2Params {
+   WOFF2Params() : extended_metadata(""), brotli_quality(11),
+                   allow_transforms(true) {}
+ 
+-  string extended_metadata;
++  std::string extended_metadata;
+   int brotli_quality;
+   bool allow_transforms;
+ };
+@@ -38,7 +27,7 @@ struct WOFF2Params {
+ // Returns an upper bound on the size of the compressed file.
+ size_t MaxWOFF2CompressedSize(const uint8_t* data, size_t length);
+ size_t MaxWOFF2CompressedSize(const uint8_t* data, size_t length,
+-                              const string& extended_metadata);
++                              const std::string& extended_metadata);
+ 
+ // Compresses the font into the target buffer. *result_length should be at least
+ // the value returned by MaxWOFF2CompressedSize(), upon return, it is set to the
+diff --git a/Source/ThirdParty/woff2/src/woff2_out.h b/Source/ThirdParty/woff2/include/woff2/output.h
+similarity index 59%
+rename from Source/ThirdParty/woff2/src/woff2_out.h
+rename to Source/ThirdParty/woff2/include/woff2/output.h
+index c956afa0e2a..c325f67be72 100644
+--- a/Source/ThirdParty/woff2/src/woff2_out.h
++++ b/Source/ThirdParty/woff2/include/woff2/output.h
+@@ -1,34 +1,10 @@
+-// Copyright 2016 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Output buffer for WOFF2 decompression.
+-
+-// Copyright 2016 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Output buffer for WOFF2 decompression.
++/* Copyright 2016 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Output buffer for WOFF2 decompression. */
+ 
+ #ifndef WOFF2_WOFF2_OUT_H_
+ #define WOFF2_WOFF2_OUT_H_
+@@ -37,16 +13,12 @@
+ #include <cstring>
+ #include <memory>
+ #include <string>
+-#include "./port.h"
+ 
+ namespace woff2 {
+ 
+ // Suggested max size for output.
+ const size_t kDefaultMaxSize = 30 * 1024 * 1024;
+ 
+-using std::string;
+-
+-
+ /**
+  * Output interface for the woff2 decoding.
+  *
+@@ -79,7 +51,7 @@ class WOFF2StringOut : public WOFF2Out {
+   // Create a writer that writes its data to buf.
+   // buf->size() will grow to at most max_size
+   // buf may be sized (e.g. using EstimateWOFF2FinalSize) or empty.
+-  explicit WOFF2StringOut(string* buf);
++  explicit WOFF2StringOut(std::string* buf);
+ 
+   bool Write(const void *buf, size_t n) override;
+   bool Write(const void *buf, size_t offset, size_t n) override;
+@@ -87,7 +59,7 @@ class WOFF2StringOut : public WOFF2Out {
+   size_t MaxSize() { return max_size_; }
+   void SetMaxSize(size_t max_size);
+  private:
+-  string* buf_;
++  std::string* buf_;
+   size_t max_size_;
+   size_t offset_;
+ };
+diff --git a/Source/ThirdParty/woff2/src/buffer.h b/Source/ThirdParty/woff2/src/buffer.h
+index 08681a6fcbf..7240e5181ce 100644
+--- a/Source/ThirdParty/woff2/src/buffer.h
++++ b/Source/ThirdParty/woff2/src/buffer.h
+@@ -1,19 +1,11 @@
+-// Copyright 2013 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// The parts of ots.h & opentype-sanitiser.h that we need, taken from the
+-// https://code.google.com/p/ots/ project.
++/* Copyright 2013 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* The parts of ots.h & opentype-sanitiser.h that we need, taken from the
++   https://code.google.com/p/ots/ project. */
+ 
+ #ifndef WOFF2_BUFFER_H_
+ #define WOFF2_BUFFER_H_
+diff --git a/Source/ThirdParty/woff2/src/convert_woff2ttf_fuzzer.cc b/Source/ThirdParty/woff2/src/convert_woff2ttf_fuzzer.cc
+index 3fdd15bc2d0..2d977a3ef20 100644
+--- a/Source/ThirdParty/woff2/src/convert_woff2ttf_fuzzer.cc
++++ b/Source/ThirdParty/woff2/src/convert_woff2ttf_fuzzer.cc
+@@ -1,7 +1,7 @@
+ #include <stddef.h>
+ #include <stdint.h>
+ 
+-#include "woff2_dec.h"
++#include <woff2/decode.h>
+ 
+ // Entry point for LibFuzzer.
+ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+diff --git a/Source/ThirdParty/woff2/src/convert_woff2ttf_fuzzer_new_entry.cc b/Source/ThirdParty/woff2/src/convert_woff2ttf_fuzzer_new_entry.cc
+index 75114a91b1e..5ad93364bfd 100644
+--- a/Source/ThirdParty/woff2/src/convert_woff2ttf_fuzzer_new_entry.cc
++++ b/Source/ThirdParty/woff2/src/convert_woff2ttf_fuzzer_new_entry.cc
+@@ -1,5 +1,5 @@
+ #include <string>
+-#include "woff2_dec.h"
++#include <woff2/decode.h>
+ 
+ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t data_size) {
+   // Decode using newer entry pattern.
+diff --git a/Source/ThirdParty/woff2/src/file.h b/Source/ThirdParty/woff2/src/file.h
+index 7afcb315fe8..61318776be3 100644
+--- a/Source/ThirdParty/woff2/src/file.h
++++ b/Source/ThirdParty/woff2/src/file.h
+@@ -1,18 +1,10 @@
+-// Copyright 2013 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// File IO helpers.
++/* Copyright 2013 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* File IO helpers. */
+ 
+ #ifndef WOFF2_FILE_H_
+ #define WOFF2_FILE_H_
+diff --git a/Source/ThirdParty/woff2/src/font.cc b/Source/ThirdParty/woff2/src/font.cc
+index 8dc10438251..6b72f6da926 100644
+--- a/Source/ThirdParty/woff2/src/font.cc
++++ b/Source/ThirdParty/woff2/src/font.cc
+@@ -1,18 +1,10 @@
+-// Copyright 2013 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Font management utilities
++/* Copyright 2013 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Font management utilities */
+ 
+ #include "./font.h"
+ 
+diff --git a/Source/ThirdParty/woff2/src/font.h b/Source/ThirdParty/woff2/src/font.h
+index 93806e6b5ee..7b8ddddc5a1 100644
+--- a/Source/ThirdParty/woff2/src/font.h
++++ b/Source/ThirdParty/woff2/src/font.h
+@@ -1,19 +1,11 @@
+-// Copyright 2013 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Data model for a font file in sfnt format, reading and writing functions and
+-// accessors for the glyph data.
++/* Copyright 2013 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Data model for a font file in sfnt format, reading and writing functions and
++   accessors for the glyph data. */
+ 
+ #ifndef WOFF2_FONT_H_
+ #define WOFF2_FONT_H_
+diff --git a/Source/ThirdParty/woff2/src/glyph.cc b/Source/ThirdParty/woff2/src/glyph.cc
+index 4c6b60a1447..057174de219 100644
+--- a/Source/ThirdParty/woff2/src/glyph.cc
++++ b/Source/ThirdParty/woff2/src/glyph.cc
+@@ -1,18 +1,10 @@
+-// Copyright 2013 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Glyph manipulation
++/* Copyright 2013 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Glyph manipulation */
+ 
+ #include "./glyph.h"
+ 
+diff --git a/Source/ThirdParty/woff2/src/glyph.h b/Source/ThirdParty/woff2/src/glyph.h
+index 0ee755c2f5a..f24056f4c8c 100644
+--- a/Source/ThirdParty/woff2/src/glyph.h
++++ b/Source/ThirdParty/woff2/src/glyph.h
+@@ -1,19 +1,11 @@
+-// Copyright 2013 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Data model and I/O for glyph data within sfnt format files for the purpose of
+-// performing the preprocessing step of the WOFF 2.0 conversion.
++/* Copyright 2013 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Data model and I/O for glyph data within sfnt format files for the purpose of
++   performing the preprocessing step of the WOFF 2.0 conversion. */
+ 
+ #ifndef WOFF2_GLYPH_H_
+ #define WOFF2_GLYPH_H_
+diff --git a/Source/ThirdParty/woff2/src/normalize.cc b/Source/ThirdParty/woff2/src/normalize.cc
+index 1af3b7db66b..39f9405fd31 100644
+--- a/Source/ThirdParty/woff2/src/normalize.cc
++++ b/Source/ThirdParty/woff2/src/normalize.cc
+@@ -1,18 +1,10 @@
+-// Copyright 2013 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Glyph normalization
++/* Copyright 2013 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Glyph normalization */
+ 
+ #include "./normalize.h"
+ 
+diff --git a/Source/ThirdParty/woff2/src/normalize.h b/Source/ThirdParty/woff2/src/normalize.h
+index e0153488ed3..c6fee74db60 100644
+--- a/Source/ThirdParty/woff2/src/normalize.h
++++ b/Source/ThirdParty/woff2/src/normalize.h
+@@ -1,20 +1,12 @@
+-// Copyright 2013 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Functions for normalizing fonts. Since the WOFF 2.0 decoder creates font
+-// files in normalized form, the WOFF 2.0 conversion is guaranteed to be
+-// lossless (in a bitwise sense) only for normalized font files.
++/* Copyright 2013 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Functions for normalizing fonts. Since the WOFF 2.0 decoder creates font
++   files in normalized form, the WOFF 2.0 conversion is guaranteed to be
++   lossless (in a bitwise sense) only for normalized font files. */
+ 
+ #ifndef WOFF2_NORMALIZE_H_
+ #define WOFF2_NORMALIZE_H_
+diff --git a/Source/ThirdParty/woff2/src/port.h b/Source/ThirdParty/woff2/src/port.h
+index b302d6c4959..8b60fee8bc9 100644
+--- a/Source/ThirdParty/woff2/src/port.h
++++ b/Source/ThirdParty/woff2/src/port.h
+@@ -1,18 +1,10 @@
+-// Copyright 2013 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Helper function for bit twiddling and macros for branch prediction.
++/* Copyright 2013 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Helper function for bit twiddling and macros for branch prediction. */
+ 
+ #ifndef WOFF2_PORT_H_
+ #define WOFF2_PORT_H_
+diff --git a/Source/ThirdParty/woff2/src/round.h b/Source/ThirdParty/woff2/src/round.h
+index abb81f8235d..e5b2cb12200 100644
+--- a/Source/ThirdParty/woff2/src/round.h
++++ b/Source/ThirdParty/woff2/src/round.h
+@@ -1,18 +1,10 @@
+-// Copyright 2013 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Helper for rounding
++/* Copyright 2013 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Helper for rounding */
+ 
+ #ifndef WOFF2_ROUND_H_
+ #define WOFF2_ROUND_H_
+diff --git a/Source/ThirdParty/woff2/src/store_bytes.h b/Source/ThirdParty/woff2/src/store_bytes.h
+index 82c1bd84ace..fff3c62f846 100644
+--- a/Source/ThirdParty/woff2/src/store_bytes.h
++++ b/Source/ThirdParty/woff2/src/store_bytes.h
+@@ -1,19 +1,11 @@
+-// Copyright 2013 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Helper functions for storing integer values into byte streams.
+-// No bounds checking is performed, that is the responsibility of the caller.
++/* Copyright 2013 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Helper functions for storing integer values into byte streams.
++   No bounds checking is performed, that is the responsibility of the caller. */
+ 
+ #ifndef WOFF2_STORE_BYTES_H_
+ #define WOFF2_STORE_BYTES_H_
+diff --git a/Source/ThirdParty/woff2/src/table_tags.cc b/Source/ThirdParty/woff2/src/table_tags.cc
+index 0071e00b00c..dca3ec8d287 100644
+--- a/Source/ThirdParty/woff2/src/table_tags.cc
++++ b/Source/ThirdParty/woff2/src/table_tags.cc
+@@ -1,18 +1,10 @@
+-// Copyright 2014 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Font table tags
++/* Copyright 2014 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Font table tags */
+ 
+ #include "./table_tags.h"
+ 
+diff --git a/Source/ThirdParty/woff2/src/table_tags.h b/Source/ThirdParty/woff2/src/table_tags.h
+index daa5d9215de..42dc0ae1c44 100644
+--- a/Source/ThirdParty/woff2/src/table_tags.h
++++ b/Source/ThirdParty/woff2/src/table_tags.h
+@@ -1,18 +1,10 @@
+-// Copyright 2014 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Font table tags
++/* Copyright 2014 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Font table tags */
+ 
+ #ifndef WOFF2_TABLE_TAGS_H_
+ #define WOFF2_TABLE_TAGS_H_
+diff --git a/Source/ThirdParty/woff2/src/transform.cc b/Source/ThirdParty/woff2/src/transform.cc
+index 2ad8b163c3c..999bef37458 100644
+--- a/Source/ThirdParty/woff2/src/transform.cc
++++ b/Source/ThirdParty/woff2/src/transform.cc
+@@ -1,18 +1,10 @@
+-// Copyright 2013 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Library for preprocessing fonts as part of the WOFF 2.0 conversion.
++/* Copyright 2013 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Library for preprocessing fonts as part of the WOFF 2.0 conversion. */
+ 
+ #include "./transform.h"
+ 
+diff --git a/Source/ThirdParty/woff2/src/transform.h b/Source/ThirdParty/woff2/src/transform.h
+index e9d1b0d3dc4..a4583d16cb2 100644
+--- a/Source/ThirdParty/woff2/src/transform.h
++++ b/Source/ThirdParty/woff2/src/transform.h
+@@ -1,18 +1,10 @@
+-// Copyright 2013 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Library for preprocessing fonts as part of the WOFF 2.0 conversion.
++/* Copyright 2014 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Library for preprocessing fonts as part of the WOFF 2.0 conversion. */
+ 
+ #ifndef WOFF2_TRANSFORM_H_
+ #define WOFF2_TRANSFORM_H_
+diff --git a/Source/ThirdParty/woff2/src/variable_length.cc b/Source/ThirdParty/woff2/src/variable_length.cc
+index 264eb0a1603..4f348d5e504 100644
+--- a/Source/ThirdParty/woff2/src/variable_length.cc
++++ b/Source/ThirdParty/woff2/src/variable_length.cc
+@@ -1,18 +1,10 @@
+-// Copyright 2015 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Helper functions for woff2 variable length types: 255UInt16 and UIntBase128
++/* Copyright 2015 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Helper functions for woff2 variable length types: 255UInt16 and UIntBase128 */
+ 
+ #include "./variable_length.h"
+ 
+diff --git a/Source/ThirdParty/woff2/src/variable_length.h b/Source/ThirdParty/woff2/src/variable_length.h
+index 2816ae23a20..20801065357 100644
+--- a/Source/ThirdParty/woff2/src/variable_length.h
++++ b/Source/ThirdParty/woff2/src/variable_length.h
+@@ -1,18 +1,10 @@
+-// Copyright 2015 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Helper functions for woff2 variable length types: 255UInt16 and UIntBase128
++/* Copyright 2015 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Helper functions for woff2 variable length types: 255UInt16 and UIntBase128 */
+ 
+ #ifndef WOFF2_VARIABLE_LENGTH_H_
+ #define WOFF2_VARIABLE_LENGTH_H_
+diff --git a/Source/ThirdParty/woff2/src/woff2_common.cc b/Source/ThirdParty/woff2/src/woff2_common.cc
+index c19acdbd9ce..fe0a3beda71 100644
+--- a/Source/ThirdParty/woff2/src/woff2_common.cc
++++ b/Source/ThirdParty/woff2/src/woff2_common.cc
+@@ -1,18 +1,10 @@
+-// Copyright 2013 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Helpers common across multiple parts of woff2
++/* Copyright 2013 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Helpers common across multiple parts of woff2 */
+ 
+ #include <algorithm>
+ 
+diff --git a/Source/ThirdParty/woff2/src/woff2_common.h b/Source/ThirdParty/woff2/src/woff2_common.h
+index a8c45af80e1..51fd4a7bf8a 100644
+--- a/Source/ThirdParty/woff2/src/woff2_common.h
++++ b/Source/ThirdParty/woff2/src/woff2_common.h
+@@ -1,18 +1,10 @@
+-// Copyright 2014 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Common definition for WOFF2 encoding/decoding
++/* Copyright 2014 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Common definition for WOFF2 encoding/decoding */
+ 
+ #ifndef WOFF2_WOFF2_COMMON_H_
+ #define WOFF2_WOFF2_COMMON_H_
+diff --git a/Source/ThirdParty/woff2/src/woff2_compress.cc b/Source/ThirdParty/woff2/src/woff2_compress.cc
+index e5cf710f793..80e31086676 100644
+--- a/Source/ThirdParty/woff2/src/woff2_compress.cc
++++ b/Source/ThirdParty/woff2/src/woff2_compress.cc
+@@ -1,23 +1,15 @@
+-// Copyright 2013 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// A commandline tool for compressing ttf format files to woff2.
++/* Copyright 2013 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* A commandline tool for compressing ttf format files to woff2. */
+ 
+ #include <string>
+ 
+ #include "file.h"
+-#include "./woff2_enc.h"
++#include <woff2/encode.h>
+ 
+ 
+ int main(int argc, char **argv) {
+diff --git a/Source/ThirdParty/woff2/src/woff2_dec.cc b/Source/ThirdParty/woff2/src/woff2_dec.cc
+index 831dd455513..8186c8e5d9e 100644
+--- a/Source/ThirdParty/woff2/src/woff2_dec.cc
++++ b/Source/ThirdParty/woff2/src/woff2_dec.cc
+@@ -1,20 +1,12 @@
+-// Copyright 2014 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Library for converting WOFF2 format font files to their TTF versions.
+-
+-#include "./woff2_dec.h"
++/* Copyright 2014 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Library for converting WOFF2 format font files to their TTF versions. */
++
++#include <woff2/decode.h>
+ 
+ #include <stdlib.h>
+ #include <algorithm>
+@@ -27,7 +19,7 @@
+ #include <memory>
+ #include <utility>
+ 
+-#include "./brotli/decode.h"
++#include <brotli/decode.h>
+ #include "./buffer.h"
+ #include "./port.h"
+ #include "./round.h"
+diff --git a/Source/ThirdParty/woff2/src/woff2_decompress.cc b/Source/ThirdParty/woff2/src/woff2_decompress.cc
+index a3422bf6767..de088b9ec0f 100644
+--- a/Source/ThirdParty/woff2/src/woff2_decompress.cc
++++ b/Source/ThirdParty/woff2/src/woff2_decompress.cc
+@@ -1,24 +1,16 @@
+-// Copyright 2013 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// A very simple commandline tool for decompressing woff2 format files to true
+-// type font files.
++/* Copyright 2013 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* A very simple commandline tool for decompressing woff2 format files to true
++   type font files. */
+ 
+ #include <string>
+ 
+ #include "./file.h"
+-#include "./woff2_dec.h"
++#include <woff2/decode.h>
+ 
+ 
+ int main(int argc, char **argv) {
+diff --git a/Source/ThirdParty/woff2/src/woff2_enc.cc b/Source/ThirdParty/woff2/src/woff2_enc.cc
+index 4e83a674f7e..ec00878bcd6 100644
+--- a/Source/ThirdParty/woff2/src/woff2_enc.cc
++++ b/Source/ThirdParty/woff2/src/woff2_enc.cc
+@@ -1,20 +1,12 @@
+-// Copyright 2014 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Library for converting TTF format font files to their WOFF2 versions.
+-
+-#include "./woff2_enc.h"
++/* Copyright 2014 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Library for converting TTF format font files to their WOFF2 versions. */
++
++#include <woff2/encode.h>
+ 
+ #include <stdlib.h>
+ #include <complex>
+@@ -23,7 +15,7 @@
+ #include <string>
+ #include <vector>
+ 
+-#include "./brotli/encode.h"
++#include <brotli/encode.h>
+ #include "./buffer.h"
+ #include "./font.h"
+ #include "./normalize.h"
+@@ -436,7 +428,7 @@ bool ConvertTTFToWOFF2(const uint8_t *data, size_t length,
+         std::pair<uint32_t, uint32_t> tag_offset(table.tag, table_offset);
+         if (index_by_tag_offset.find(tag_offset) == index_by_tag_offset.end()) {
+ #ifdef FONT_COMPRESSION_BIN
+-          fprintf(stderr, "Missing table index for offset 0x%08x\n",
++fprintf(stderr, "Missing table index for offset 0x%08x\n",
+                   table_offset);
+ #endif
+           return FONT_COMPRESSION_FAILURE();
+diff --git a/Source/ThirdParty/woff2/src/woff2_info.cc b/Source/ThirdParty/woff2/src/woff2_info.cc
+index 5dff871b816..2b51adcb622 100644
+--- a/Source/ThirdParty/woff2/src/woff2_info.cc
++++ b/Source/ThirdParty/woff2/src/woff2_info.cc
+@@ -1,18 +1,10 @@
+-// Copyright 2014 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// A commandline tool for dumping info about a woff2 file.
++/* Copyright 2014 Google Inc. All Rights Reserved.
++
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* A commandline tool for dumping info about a woff2 file. */
+ 
+ #include <string>
+ 
+diff --git a/Source/ThirdParty/woff2/src/woff2_out.cc b/Source/ThirdParty/woff2/src/woff2_out.cc
+index 8882306445b..8ab32681f1d 100644
+--- a/Source/ThirdParty/woff2/src/woff2_out.cc
++++ b/Source/ThirdParty/woff2/src/woff2_out.cc
+@@ -1,20 +1,14 @@
+-// Copyright 2014 Google Inc. All Rights Reserved.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// Output buffer for WOFF2 decompression.
++/* Copyright 2014 Google Inc. All Rights Reserved.
+ 
+-#include "./woff2_out.h"
++   Distributed under MIT license.
++   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
++*/
++
++/* Output buffer for WOFF2 decompression. */
++
++#include <woff2/output.h>
++
++using std::string;
+ 
+ namespace woff2 {
+ 
+diff --git a/Source/ThirdParty/woff2/update.sh b/Source/ThirdParty/woff2/update.sh
+index c67cb43f1c6..7e15f564ff1 100755
+--- a/Source/ThirdParty/woff2/update.sh
++++ b/Source/ThirdParty/woff2/update.sh
+@@ -10,8 +10,9 @@ git clone https://github.com/google/woff2 ${MY_TEMP_DIR}/woff2
+ COMMIT=`(cd ${MY_TEMP_DIR}/woff2 && git log | head -n 1)`
+ perl -p -i -e "s/\[commit [0-9a-f]{40}\]/[${COMMIT}]/" README.webkit;
+ 
+-rm -rf src
++rm -rf src include
+ mv ${MY_TEMP_DIR}/woff2/src src
++mv ${MY_TEMP_DIR}/woff2/include include
+ rm -rf ${MY_TEMP_DIR}
+ 
+ echo "###"
+diff --git a/Source/WebCore/CMakeLists.txt b/Source/WebCore/CMakeLists.txt
+index 37847287c18..68307bbf4f6 100644
+--- a/Source/WebCore/CMakeLists.txt
++++ b/Source/WebCore/CMakeLists.txt
+@@ -3653,7 +3653,7 @@ if (ENABLE_USER_MESSAGE_HANDLERS)
+ endif ()
+ 
+ if (USE_WOFF2)
+-  list(APPEND WebCore_INCLUDE_DIRECTORIES "${THIRDPARTY_DIR}/woff2/src")
++  list(APPEND WebCore_INCLUDE_DIRECTORIES "${THIRDPARTY_DIR}/woff2/include")
+   list(APPEND WebCore_LIBRARIES woff2)
+ endif ()
+ 
+diff --git a/Source/WebCore/platform/graphics/WOFFFileFormat.cpp b/Source/WebCore/platform/graphics/WOFFFileFormat.cpp
+index 1b40708dbd0..fc6b3c270b8 100644
+--- a/Source/WebCore/platform/graphics/WOFFFileFormat.cpp
++++ b/Source/WebCore/platform/graphics/WOFFFileFormat.cpp
+@@ -31,8 +31,8 @@
+ #include <wtf/ByteOrder.h>
+ 
+ #if USE(WOFF2)
+-#include "woff2_common.h"
+-#include "woff2_dec.h"
++#include <woff2/decode.h>
++static const uint32_t kWoff2Signature = 0x774f4632; // "wOF2"
+ #endif
+ 
+ namespace WebCore {
+@@ -84,7 +84,7 @@ bool isWOFF(SharedBuffer& buffer)
+         return false;
+ 
+ #if USE(WOFF2)
+-    return signature == woffSignature || signature == woff2::kWoff2Signature;
++    return signature == woffSignature || signature == kWoff2Signature;
+ #else
+     return signature == woffSignature;
+ #endif
+@@ -140,7 +140,7 @@ bool convertWOFFToSfnt(SharedBuffer& woff, Vector<char>& sfnt)
+     }
+ 
+ #if USE(WOFF2)
+-    if (signature == woff2::kWoff2Signature) {
++    if (signature == kWoff2Signature) {
+         const uint8_t* woffData = reinterpret_cast_ptr<const uint8_t*>(woff.data());
+         const size_t woffSize = woff.size();
+         const size_t sfntSize = woff2::ComputeWOFF2FinalSize(woffData, woffSize);
+-- 
+2.14.2
+
